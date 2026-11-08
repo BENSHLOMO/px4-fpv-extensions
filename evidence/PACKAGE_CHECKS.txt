@@ -1,0 +1,6 @@
+PASS: original patch preserved byte-for-byte
+PASS: 14 expected paths; 21 TRTL metadata definitions
+PASS: nine added source files match embedded Git blob hashes
+PASS: no old turtle parameter prefixes in patch
+PASS: no obvious private key/token/home-path patterns found in patch (limited heuristic scan)
+No clean upstream application or target build performed in this review.

@@ -1,0 +1,7 @@
+test_apply_roundtrip_preserves_checkout_index_and_head (__main__.ReviewTools.test_apply_roundtrip_preserves_checkout_index_and_head) ... ok
+test_unsafe_path_rejected (__main__.ReviewTools.test_unsafe_path_rejected) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.045s
+
+OK

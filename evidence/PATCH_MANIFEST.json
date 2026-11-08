@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "review_date": "2026-11-08",
+  "patch": "patches/dragonfly-b8-trtl.patch",
+  "patch_sha256": "2f4933719c71876fea964ea87c48cdb550f9c8f21d87fae6f8171fe2d1cbe913",
+  "size_bytes": 73391,
+  "line_count": 1516,
+  "base_commit_reported": "94cb2012792b2ae89f0b147cfee53ee31ae550be",
+  "frozen_tag_reported": "dragonfly-b8-trtl-tested-20261107T225810Z",
+  "frozen_commit_reported": "ccfc0f53587c139b8d7afdecf374732665037612",
+  "touched_files": [
+    {
+      "path": "src/drivers/dshot/ArmingInterlock.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "5e8258d704d6e26aef19a9de2fcc19665096bcb5",
+      "additions": 2
+    },
+    {
+      "path": "src/drivers/dshot/DShot.cpp",
+      "new_file": false,
+      "base_blob": "10c356ade1b60a3208782e74725412420036f072",
+      "target_blob": "815978e852cda0992fabc0bda64909ec9009c6ed",
+      "additions": 246
+    },
+    {
+      "path": "src/drivers/dshot/DShot.h",
+      "new_file": false,
+      "base_blob": "9b4d8cfb484ec054106e39c54340362bec7fead7",
+      "target_blob": "96ec480fbf6ae720e8ac0d1c15ba3ff6dedfc1ee",
+      "additions": 107
+    },
+    {
+      "path": "src/drivers/dshot/DragonflyTurtleAngle.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "c2aca11974cff582c56496089def1df408817a11",
+      "additions": 20
+    },
+    {
+      "path": "src/drivers/dshot/DragonflyTurtleCore.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "f25cc92a9726706c0355fb5cf779eee3da13beb6",
+      "additions": 226
+    },
+    {
+      "path": "src/drivers/dshot/DragonflyTurtleInput.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "64b1555fa495a839afe6bef28c08a82867717d7e",
+      "additions": 33
+    },
+    {
+      "path": "src/drivers/dshot/DragonflyTurtleMapping.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "9b3926ea45dd5d270d0228a7339b2baff0ab753c",
+      "additions": 98
+    },
+    {
+      "path": "src/drivers/dshot/DragonflyTurtleMotor.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "5e4a4272f0230e19daeaec12e07a7eeab32dcaef",
+      "additions": 229
+    },
+    {
+      "path": "src/drivers/dshot/DragonflyTurtleRc.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "4923ca0011a8e93630dafe2c5a1fee75cf531950",
+      "additions": 42
+    },
+    {
+      "path": "src/drivers/dshot/DragonflyTurtleTimer.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "57267229a9fe341e6bea39f4e83469b2d4847f21",
+      "additions": 63
+    },
+    {
+      "path": "src/drivers/dshot/module.yaml",
+      "new_file": false,
+      "base_blob": "e2dcf8bc97e8ac396b5ff50ed0c1a9c70c3d5813",
+      "target_blob": "8b4b8b1e8a01e410d0ed8fd719b274e9bb256e98",
+      "additions": 202
+    },
+    {
+      "path": "src/lib/dragonfly_turtle/ArmingInterlock.hpp",
+      "new_file": true,
+      "base_blob": "0000000000000000000000000000000000000000",
+      "target_blob": "775b56547a54b30bee72aa2e45502e22ac3ba251",
+      "additions": 59
+    },
+    {
+      "path": "src/lib/mixer_module/mixer_module.hpp",
+      "new_file": false,
+      "base_blob": "c55b72da4e92e600a8dd0761ea08c521e9d64a3d",
+      "target_blob": "42283dc8614eda3aa2faf183ce712b3ab3a94e7c",
+      "additions": 1
+    },
+    {
+      "path": "src/modules/commander/Commander.cpp",
+      "new_file": false,
+      "base_blob": "cebc08ae94165b3eea4c1aebb1f0d82dc8303f1c",
+      "target_blob": "172064ddd4bececd7ec166f3119d1bd2e537abe4",
+      "additions": 18
+    }
+  ],
+  "artifact_note": "Patch preserved byte-for-byte. Base commit and snapshot identifiers were supplied in conversation; no full upstream checkout was available for independent apply/build validation in this review."
+}

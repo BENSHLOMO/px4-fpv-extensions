@@ -1,0 +1,7 @@
+Review date: 2026-11-08
+Tests run inside the assistant's Linux x86_64 container, not on the aircraft.
+C++ tests: g++ -std=c++14 -O2 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all -pthread
+Header source: new-file payloads extracted from the uploaded immutable patch and checked against its full Git blob hashes.
+Prior host suite provenance: dragonfly_stage2b8_complete_rcfix_20261107.zip, tests/*.cpp.
+Full pinned-base application, PX4 ARM/NuttX compilation and hardware validation: not performed here.
+Network attempts to retrieve the pinned upstream files failed. The read-only verifier can use the user's existing local Git objects.

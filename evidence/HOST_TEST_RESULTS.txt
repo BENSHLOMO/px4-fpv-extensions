@@ -1,0 +1,7 @@
+PASS: 9 new-file Git blob hashes verified
+PASS: real-log RC timestamp, missing optional stamp, timeout/future/loss rejection, channel and conflict checks
+PASS: 25 controller scenarios, 6 callback rates, config/RC/geometry/attitude validation
+PASS: 44 phase/fault cases and 1000 repeat/release/arming cycles
+PASS: 285120 motor/slot permutations; invalid maps and 32-bit boundaries
+PASS: Commander guard lifetimes, cross-translation-unit identity, 200000 concurrent reservation attempts
+PASS: all 5 host suites against exact exported new headers; not a full PX4 build

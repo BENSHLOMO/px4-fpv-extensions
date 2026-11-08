@@ -1,0 +1,6 @@
+# Preserve the exact snapshot patch bytes on Windows checkouts.
+patches/*.patch -text
+*.md text eol=lf
+*.py text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf

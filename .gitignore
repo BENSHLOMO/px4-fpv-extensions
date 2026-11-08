@@ -1,0 +1,22 @@
+# Keep aircraft backups, calibration, binary firmware and local secrets out.
+*.params
+*.px4
+*.bin
+*.elf
+*.ulg
+*.zip
+*.tar
+*.tar.gz
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+__pycache__/
+*.pyc
+build/
+private/
+*_frozen/
+.DS_Store
+Thumbs.db

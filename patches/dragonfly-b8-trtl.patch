@@ -1,0 +1,1516 @@
+diff --git a/src/drivers/dshot/ArmingInterlock.hpp b/src/drivers/dshot/ArmingInterlock.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..5e8258d704d6e26aef19a9de2fcc19665096bcb5
+--- /dev/null
++++ b/src/drivers/dshot/ArmingInterlock.hpp
+@@ -0,0 +1,2 @@
++#pragma once
++#include <lib/dragonfly_turtle/ArmingInterlock.hpp>
+diff --git a/src/drivers/dshot/DShot.cpp b/src/drivers/dshot/DShot.cpp
+index 10c356ade1b60a3208782e74725412420036f072..815978e852cda0992fabc0bda64909ec9009c6ed 100644
+--- a/src/drivers/dshot/DShot.cpp
++++ b/src/drivers/dshot/DShot.cpp
+@@ -32,6 +32,9 @@
+  ****************************************************************************/
+ 
+ #include "DShot.h"
++#include <cmath>
++#include <parameters/param.h>
++#include <math.h> // NAN: no C++ limits dependency
+ 
+ #include <px4_arch/io_timer.h>
+ 
+@@ -419,6 +422,46 @@ bool DShot::updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
+ 	if (!_outputs_on) {
+ 		return false;
+ 	}
++	    // DRAGONFLY 2B8 OUTPUT BEGIN
++    _trtl_output_seen=true;
++    update_turtle_inputs(); // mixer has consumed the latest arming/test state by this callback.
++    if (_trtl_core.owns_outputs() && _current_command.valid()) {
++        // A queued command must not run after temporary reversal. Cancel, stop, restore.
++        _current_command.num_repetitions=0;
++        _trtl_input.hardware_ok=false;
++        PX4_WARN("Turtle: cancelled concurrent DShot command");
++    }
++    _trtl_frame=_trtl_core.step(hrt_absolute_time(),_trtl_input);
++    // Do not allow a motor-test path to bypass startup direction normalization.
++    if (_trtl_frame.action==dragonfly_trtl::Action::NORMAL && _trtl_requested
++        && (!_trtl_core.configured() || !_trtl_core.synced())
++        && !(_mixing_output.armed().armed || _turtle_armed.armed)
++        && dragonfly_trtl::interlock().owner()!=dragonfly_trtl::Owner::FLIGHT) {
++        _trtl_frame={dragonfly_trtl::Action::STOP,0,0};
++    }
++    if (_trtl_frame.action!=dragonfly_trtl::Action::NORMAL) {
++        for (unsigned i=0;i<MAX_ACTUATORS;++i) {
++            const uint32_t bit=uint32_t{1}<<i;
++            if (!(_output_mask&bit)) {continue;}
++            if (!(_trtl_frame.outputs&bit)) {
++                up_dshot_motor_command(i,DShot_cmd_motor_stop,false);
++            } else if (_trtl_frame.action==dragonfly_trtl::Action::REVERSE) {
++                up_dshot_motor_command(i,DShot_cmd_spin_direction_reversed,true);
++            } else if (_trtl_frame.action==dragonfly_trtl::Action::RESTORE) {
++                up_dshot_motor_command(i,DShot_cmd_spin_direction_normal,true);
++            } else if (_trtl_frame.action==dragonfly_trtl::Action::THROTTLE) {
++                up_dshot_motor_data_set(i,_trtl_frame.level,false);
++            } else {
++                up_dshot_motor_command(i,DShot_cmd_motor_stop,false);
++            }
++        }
++        up_dshot_trigger();
++        return true;
++    }
++    if (_trtl_fallback) {return false;} // never manufacture normal/test/flight output values.
++    // DRAGONFLY 2B8 OUTPUT END
++
++
+ 
+ 	int requested_telemetry_index = -1;
+ 
+@@ -517,6 +560,155 @@ bool DShot::updateOutputs(bool stop_motors, uint16_t outputs[MAX_ACTUATORS],
+ 	return true;
+ }
+ 
++// Stage 2B1 independent recovery gate. Motor output is compile-disabled.
++// This duplicates the already-validated Stage 2A preconditions inside the
++// DShot driver, instead of trusting commands from another PX4 module.
++// Stage 2B5: read PX4 parameter values while IDLE, not during a motor burst.
++// Polling at 4 Hz avoids expensive parameter accesses in the 8+ kHz output loop.
++// 2B6: select a physical RC input channel, not a hard-coded AUX slot.
++float DShot::turtle_radio_value(int32_t channel) const
++{
++    const uint64_t now = hrt_absolute_time();
++    if (!dragonfly_turtle_rc::healthy(now, _turtle_rc_channels.timestamp,
++                                     _turtle_rc_channels.timestamp_last_valid,
++                                     _turtle_rc_channels.signal_lost)) {
++        return NAN;
++    }
++    return dragonfly_turtle_rc::select(_turtle_rc_channels.channels,
++                                      _turtle_rc_channels.channel_count, channel);
++}
++
++// 2B7: accepted only while idle, disarmed, with old and new switches OFF.
++// Values are frozen for the complete recovery, including direction restoration.
++void DShot::update_turtle_parameters()
++{
++    using namespace dragonfly_trtl;
++    const uint64_t now=hrt_absolute_time();
++    if (_trtl_last_params && now>=_trtl_last_params && now-_trtl_last_params<250000) { return; }
++    _trtl_last_params=now;
++    if (_trtl_enable_handle==PARAM_INVALID) {_trtl_enable_handle=param_find("TRTL_EN");}
++    int32_t requested=0;
++    if (_trtl_enable_handle!=PARAM_INVALID && param_get(_trtl_enable_handle,&requested)==PX4_OK) {_trtl_requested=requested!=0;}
++    if (_trtl_core.busy() || interlock().owner()==Owner::FLIGHT) {return;}
++    if (!fresh(now,_turtle_status.timestamp,750000) || !fresh(now,_turtle_armed.timestamp,750000)
++        || _turtle_status.arming_state!=vehicle_status_s::ARMING_STATE_DISARMED
++        || _turtle_armed.armed || _mixing_output.armed().armed) { return; }
++    if (_trtl_loaded && !_trtl_input.switch_off) { return; }
++    const char *names[]={"TRTL_EN","TRTL_ESC","TRTL_CH","TRTL_POL",
++        "TRTL_ANGLE","TRTL_EXIT","TRTL_MIN","TRTL_MAX","TRTL_RAMP","TRTL_TIME",
++        "TRTL_PRE","TRTL_POST","TRTL_SETTLE","TRTL_COOL","TRTL_DB","TRTL_PWR","TRTL_HOLD",
++        "TRTL_FL","TRTL_FR","TRTL_RL","TRTL_RR","CA_ROTOR_COUNT"};
++    const unsigned count=sizeof(names)/sizeof(names[0]);
++    if (!_trtl_handles_initialized) { for (auto &h:_trtl_handles) {h=PARAM_INVALID;} _trtl_handles_initialized=true; }
++    int32_t v[25]{};
++    for (unsigned i=0;i<count;++i) {
++        if (_trtl_handles[i]==PARAM_INVALID) {_trtl_handles[i]=param_find(names[i]);}
++        if (_trtl_handles[i]==PARAM_INVALID || param_get(_trtl_handles[i],&v[i])!=PX4_OK) {
++            _trtl_loaded=false;_trtl_core.invalidate();return;
++        }
++    }
++    Config c;
++    c.enabled=v[0];c.esc=v[1];c.channel=v[2];c.polarity=v[3];c.entry_deg=v[4];c.exit_deg=v[5];
++    c.start=v[6];c.peak=v[7];c.ramp_ms=v[8];c.drive_ms=v[9];c.pre_ms=v[10];c.post_ms=v[11];
++    c.settle_ms=v[12];c.cooldown_ms=v[13];c.deadband_pct=v[14];c.proportional=v[15];c.hold_ms=v[16];
++    dragonfly_mapping::Config corners;
++    for (unsigned i=0;i<4;++i) {corners.motor[i]=v[17+i];}
++    int32_t functions[MAX_ACTUATORS]{};
++    static_assert(MAX_ACTUATORS<=32,"Turtle output mask too narrow");
++    for (unsigned i=0;i<MAX_ACTUATORS;++i) {functions[i]=static_cast<int32_t>(_mixing_output.outputFunction(i));}
++    const auto resolved=dragonfly_mapping::resolve(corners,functions,MAX_ACTUATORS,_output_mask);
++    c.outputs=resolved.all;
++    _trtl_geometry_ok=v[21]==4 && resolved.valid();
++    // Validate configured allocation positions and axes, not just the number of motors.
++    const char *suffix[]={"PX","PY","AX","AY","AZ"};
++    for (unsigned i=0;i<4 && _trtl_geometry_ok;++i) {
++        float geom[5]{};
++        for (unsigned j=0;j<5;++j) {
++            char name[24];snprintf(name,sizeof(name),"CA_ROTOR%ld_%s",long(corners.motor[i]-1),suffix[j]);
++            const param_t p=param_find(name);
++            if (p==PARAM_INVALID || param_get(p,&geom[j])!=PX4_OK) {_trtl_geometry_ok=false;break;}
++        }
++        _trtl_geometry_ok=_trtl_geometry_ok && quad_corner(i,geom[0],geom[1],geom[2],geom[3],geom[4]);
++        char tilt_name[32];snprintf(tilt_name,sizeof(tilt_name),"CA_ROTOR%ld_TILT",long(corners.motor[i]-1));
++        const param_t tilt_handle=param_find(tilt_name);int32_t tilt=0;
++        if (tilt_handle==PARAM_INVALID || param_get(tilt_handle,&tilt)!=PX4_OK || tilt!=0) {_trtl_geometry_ok=false;}
++    }
++    _trtl_rc_conflict=rc_conflict(_turtle_rc_channels.function,
++        sizeof(_turtle_rc_channels.function)/sizeof(_turtle_rc_channels.function[0]),c.channel);
++    // Mode selection can be separate from rc_channels.function in this PX4 generation.
++    const char *mode_names[]={"RC_MAP_FLTMODE","RC_MAP_MODE_SW","RC_MAP_FLTBTN"};
++    for (const auto name:mode_names) {
++        const param_t p=param_find(name);int32_t ch=0;
++        if (p!=PARAM_INVALID && param_get(p,&ch)==PX4_OK && ch==c.channel) {_trtl_rc_conflict=true;}
++    }
++    const bool raw_ok=dragonfly_turtle_rc::healthy(now,_turtle_rc_channels.timestamp,
++        _turtle_rc_channels.timestamp_last_valid,_turtle_rc_channels.signal_lost);
++    const float raw=raw_ok?dragonfly_turtle_rc::select(_turtle_rc_channels.channels,
++        _turtle_rc_channels.channel_count,c.channel):NAN;
++    if (!std::isfinite(raw) || raw*float(c.polarity)>=-0.3f) {return;}
++    _trtl_loaded=false;
++    if (!resolved.valid() || !_trtl_geometry_ok || _trtl_rc_conflict || !c.valid()) {_trtl_core.invalidate();return;}
++    // Changes to mapping invalidate synchronization even if the same four output bits are reused.
++    if (_trtl_core.configured() && !dragonfly_mapping::same(_trtl_map,resolved)) {_trtl_core.invalidate();}
++    _trtl_config=c;_trtl_map_config=corners;_trtl_map=resolved;
++    _trtl_loaded=_trtl_core.configure(c);
++}
++
++void DShot::update_turtle_inputs()
++{
++    using namespace dragonfly_trtl;
++    if (_turtle_manual_sub.updated()) {_turtle_manual_sub.copy(&_turtle_manual);}
++    if (_turtle_status_sub.updated()) {_turtle_status_sub.copy(&_turtle_status);}
++    if (_turtle_armed_sub.updated()) {_turtle_armed_sub.copy(&_turtle_armed);}
++    if (_turtle_att_sub.updated()) {_turtle_att_sub.copy(&_turtle_att);}
++    if (_turtle_rc_sub.updated()) {_turtle_rc_sub.copy(&_turtle_rc_channels);}
++    const uint64_t now=hrt_absolute_time();
++    Input in;
++    const bool state_fresh=fresh(now,_turtle_status.timestamp,750000) && fresh(now,_turtle_armed.timestamp,750000);
++    in.disarmed=state_fresh && _turtle_status.arming_state==vehicle_status_s::ARMING_STATE_DISARMED
++        && !_turtle_armed.armed && !_mixing_output.armed().armed;
++    const auto &a=_mixing_output.armed();
++    in.hardware_ok=state_fresh && !_turtle_armed.lockdown && !_turtle_armed.manual_lockdown
++        && !_turtle_armed.force_failsafe && !_turtle_armed.in_esc_calibration_mode
++        && !a.lockdown && !a.manual_lockdown && !a.force_failsafe && !a.in_esc_calibration_mode
++        && (!_turtle_status.safety_button_available || _turtle_status.safety_off)
++        && !_turtle_status.calibration_enabled && !_turtle_status.rc_calibration_in_progress
++        && !_turtle_status.failsafe && !_mixing_output.isActuatorTestRunning() && !_current_command.valid();
++    int32_t functions[MAX_ACTUATORS]{};
++    for (unsigned i=0;i<MAX_ACTUATORS;++i) {functions[i]=static_cast<int32_t>(_mixing_output.outputFunction(i));}
++    const auto current=dragonfly_mapping::resolve(_trtl_map_config,functions,MAX_ACTUATORS,_output_mask);
++    _trtl_map_ok=_trtl_loaded && _trtl_geometry_ok && dragonfly_mapping::same(current,_trtl_map)
++        && !_turtle_status.is_vtol && _turtle_status.vehicle_type==vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
++        && !_param_dshot_3d_enable.get() && !_reversible_outputs;
++    in.mapping_ok=_trtl_map_ok;
++    const bool raw_ok=dragonfly_turtle_rc::healthy(now,_turtle_rc_channels.timestamp,
++        _turtle_rc_channels.timestamp_last_valid,_turtle_rc_channels.signal_lost);
++    const bool conflict=rc_conflict(_turtle_rc_channels.function,
++        sizeof(_turtle_rc_channels.function)/sizeof(_turtle_rc_channels.function[0]),_trtl_config.channel);
++    in.rc_ok=raw_ok && !conflict && !_trtl_rc_conflict && fresh(now,_turtle_manual.timestamp,300000)
++        && fresh(now,_turtle_manual.timestamp_sample,300000) && _turtle_manual.valid
++        && _turtle_manual.data_source==manual_control_setpoint_s::SOURCE_RC;
++    const float raw=raw_ok?dragonfly_turtle_rc::select(_turtle_rc_channels.channels,
++        _turtle_rc_channels.channel_count,_trtl_config.channel):NAN;
++    const float sw=raw*float(_trtl_config.polarity);
++    in.switch_on=in.rc_ok && std::isfinite(sw) && sw>0.7f;
++    // Center position is neither a valid reset nor ON. Ambiguous switch values stop a burst.
++    in.switch_off=in.rc_ok && std::isfinite(sw) && sw< -0.3f;
++    in.throttle_low=in.rc_ok && std::isfinite(_turtle_manual.throttle) && _turtle_manual.throttle< -0.85f;
++    in.vertical=vertical(_turtle_att.q);
++    in.attitude_ok=fresh(now,_turtle_att.timestamp,300000) && std::isfinite(in.vertical);
++    const float roll=_turtle_manual.roll,pitch=_turtle_manual.pitch;
++    const bool sticks=std::isfinite(roll)&&std::isfinite(pitch)&&std::fabs(roll)<=1.05f&&std::fabs(pitch)<=1.05f;
++    if(sticks) {
++        in.selected=dragonfly_mapping::select(_trtl_map,roll,pitch,float(_trtl_config.deadband_pct)*0.01f);
++        const float roll_magnitude = std::fabs(roll);
++        const float pitch_magnitude = std::fabs(pitch);
++        in.strength = (roll_magnitude > pitch_magnitude) ? roll_magnitude : pitch_magnitude;
++        if(in.strength>1.f) {in.strength=1.f;}
++    } else {in.rc_ok=false;}
++    _trtl_input=in;
++}
++
+ void DShot::Run()
+ {
+ 	if (should_exit()) {
+@@ -529,7 +721,18 @@ void DShot::Run()
+ 
+ 	perf_begin(_cycle_perf);
+ 
++	update_turtle_parameters();
++	update_turtle_inputs();
++    _trtl_output_seen=false;
+ 	_mixing_output.update();
++    if (!_trtl_output_seen && (_trtl_requested || _trtl_core.owns_outputs()) && _outputs_on) {
++        uint16_t turtle_zero[MAX_ACTUATORS]{};
++        _trtl_fallback=true;
++        updateOutputs(true,turtle_zero,MAX_ACTUATORS,0);
++        _trtl_fallback=false;
++    }
++    if (_trtl_requested || _trtl_core.owns_outputs()) { ScheduleDelayed(10000); }
++
+ 
+ 	// update output status if armed or if mixer is loaded
+ 	bool outputs_on = true;
+@@ -701,6 +904,11 @@ void DShot::update_params()
+ 
+ int DShot::custom_command(int argc, char *argv[])
+ {
++    if (dragonfly_trtl::interlock().recovery_owned()) {
++        PX4_WARN("DShot command denied during turtle recovery/restoration");
++        return PX4_ERROR;
++    }
++
+ 	const char *verb = argv[0];
+ 
+ 	if (!strcmp(verb, "telemetry")) {
+@@ -797,6 +1005,44 @@ int DShot::print_status()
+ 	PX4_INFO("Outputs initialized: %s", _outputs_initialized ? "yes" : "no");
+ 	PX4_INFO("Outputs used: 0x%" PRIx32, _output_mask);
+ 	PX4_INFO("Outputs on: %s", _outputs_on ? "yes" : "no");
++    PX4_INFO("Dragonfly 2B8: configured=%d enabled=%d synced=%d phase=%s reason=%s",
++        (int)_trtl_loaded,(int)_trtl_core.enabled(),(int)_trtl_core.synced(),
++        dragonfly_trtl::phase_name(_trtl_core.phase),dragonfly_trtl::reason_name(_trtl_core.reason));
++    PX4_INFO("TRTL: map=%d geometry=%d rc_conflict=%d owner=%u ready=%d",
++        (int)_trtl_map_ok,(int)_trtl_geometry_ok,(int)_trtl_rc_conflict,
++        (unsigned)dragonfly_trtl::interlock().owner(),(int)dragonfly_trtl::interlock().ready());
++    PX4_INFO("TRTL: outputs FL=%u FR=%u RL=%u RR=%u CH=%ld POL=%ld",
++        dragonfly_mapping::output_number(_trtl_map.corner[0]),dragonfly_mapping::output_number(_trtl_map.corner[1]),
++        dragonfly_mapping::output_number(_trtl_map.corner[2]),dragonfly_mapping::output_number(_trtl_map.corner[3]),
++        long(_trtl_config.channel),long(_trtl_config.polarity));
++    PX4_INFO("TRTL: entry=%ld exit=%ld start=%ld peak=%ld ramp=%ld drive=%ld",
++        long(_trtl_config.entry_deg),long(_trtl_config.exit_deg),long(_trtl_config.start),
++        long(_trtl_config.peak),long(_trtl_config.ramp_ms),long(_trtl_config.drive_ms));
++    PX4_INFO("TRTL: attempts=%u restores_sent=%u reverse_frames=%u restore_frames=%u throttle_frames=%u last_drive_ms=%u",
++        (unsigned)_trtl_core.attempts,(unsigned)_trtl_core.restore_sequences_sent,(unsigned)_trtl_core.reverse_frames,
++        (unsigned)_trtl_core.restore_frames,(unsigned)_trtl_core.throttle_frames,(unsigned)_trtl_core.last_drive_ms);
++    PX4_INFO("TRTL: rc=%d on=%d off=%d low=%d disarmed=%d hardware=%d tilt_z=%.3f selected=0x%x level=%u",
++        (int)_trtl_input.rc_ok,(int)_trtl_input.switch_on,(int)_trtl_input.switch_off,(int)_trtl_input.throttle_low,
++        (int)_trtl_input.disarmed,(int)_trtl_input.hardware_ok,(double)_trtl_input.vertical,
++        (unsigned)_trtl_frame.outputs,(unsigned)_trtl_frame.level);
++
++	
++	
++	
++    
++    
++
++	
++	
++	
++    
++    
++    
++    
++    
++    
++    
++    
+ 	perf_print_counter(_cycle_perf);
+ 	_mixing_output.printStatus();
+ 
+diff --git a/src/drivers/dshot/DShot.h b/src/drivers/dshot/DShot.h
+index 9b4d8cfb484ec054106e39c54340362bec7fead7..96ec480fbf6ae720e8ac0d1c15ba3ff6dedfc1ee 100644
+--- a/src/drivers/dshot/DShot.h
++++ b/src/drivers/dshot/DShot.h
+@@ -41,6 +41,20 @@
+ #include <uORB/topics/vehicle_command_ack.h>
+ 
+ #include "DShotTelemetry.h"
++#include "DragonflyTurtleMotor.hpp"
++#include "DragonflyTurtleRc.hpp"
++#include "DragonflyTurtleAngle.hpp"
++#include <uORB/topics/rc_channels.h>
++#include <parameters/param.h>
++#include "DragonflyTurtleTimer.hpp"
++#include "DragonflyTurtleMapping.hpp"
++#include "DragonflyTurtleCore.hpp"
++#include "DragonflyTurtleInput.hpp"
++#include <uORB/Subscription.hpp>
++#include <uORB/topics/manual_control_setpoint.h>
++#include <uORB/topics/vehicle_status.h>
++#include <uORB/topics/actuator_armed.h>
++#include <uORB/topics/vehicle_attitude.h>
+ 
+ using namespace time_literals;
+ 
+@@ -133,6 +147,25 @@ private:
+ 
+ 	int request_esc_info();
+ 
++	float turtle_radio_value(int32_t channel) const;
++    // DRAGONFLY 2B8 BEGIN: one controller owns recovery output and restore routing.
++    dragonfly_trtl::Core _trtl_core{dragonfly_trtl::interlock()};
++    dragonfly_trtl::Config _trtl_config{};
++    dragonfly_trtl::Input _trtl_input{};
++    dragonfly_trtl::Frame _trtl_frame{};
++    dragonfly_mapping::Config _trtl_map_config{};
++    dragonfly_mapping::Resolved _trtl_map{};
++    bool _trtl_loaded{false}, _trtl_map_ok{false}, _trtl_geometry_ok{false}, _trtl_rc_conflict{true};
++    bool _trtl_output_seen{false}, _trtl_fallback{false};
++    uint64_t _trtl_last_params{0};
++    param_t _trtl_handles[25]{};
++    bool _trtl_handles_initialized{false};
++    param_t _trtl_enable_handle{PARAM_INVALID};
++    bool _trtl_requested{false};
++    // DRAGONFLY 2B8 END
++
++	void update_turtle_parameters();
++	void update_turtle_inputs();
+ 	void Run() override;
+ 
+ 	void update_params();
+@@ -144,6 +177,80 @@ private:
+ 	MixingOutput _mixing_output{PARAM_PREFIX, DIRECT_PWM_OUTPUT_CHANNELS, *this, MixingOutput::SchedulingPolicy::Auto, false, false};
+ 	uint32_t _reversible_outputs{};
+ 
++	// Stage 2B1: second, driver-local reading of recovery safety inputs.
++	// The monitor is deliberately independent of the Stage 2A module.
++	uORB::Subscription _turtle_manual_sub{ORB_ID(manual_control_setpoint)};
++	uORB::Subscription _turtle_status_sub{ORB_ID(vehicle_status)};
++	uORB::Subscription _turtle_armed_sub{ORB_ID(actuator_armed)};
++	uORB::Subscription _turtle_att_sub{ORB_ID(vehicle_attitude)};
++	manual_control_setpoint_s _turtle_manual{};
++	vehicle_status_s _turtle_status{};
++	actuator_armed_s _turtle_armed{};
++	vehicle_attitude_s _turtle_att{};
++	dragonfly_turtle::RecoveryTimer _turtle_timer{};
++	dragonfly_motor::Sequencer _turtle_sequencer{};
++	dragonfly_motor::Frame _turtle_frame{};
++	uint32_t _turtle_proposed_mask{0};
++	bool _turtle_candidate{false};
++	bool _turtle_mapping_ok{false};
++	// 2B7: logical motor numbers, resolved to this DShot instance's output slots.
++    param_t _turtle_param_enable{PARAM_INVALID};
++    param_t _turtle_param_rotor_count{PARAM_INVALID};
++    param_t _turtle_param_map[4]{PARAM_INVALID, PARAM_INVALID, PARAM_INVALID, PARAM_INVALID};
++    dragonfly_mapping::Config _turtle_map_config{};
++    dragonfly_mapping::Resolved _turtle_mapping{};
++    bool _turtle_enabled{false};
++    bool _turtle_quad{false};
++    bool _turtle_mapping_fault{false};
++
++	bool _turtle_release_ok{false};
++    // Cached parameter handles; polling happens in Run(), never in updateOutputs().
++    param_t _turtle_param_min{PARAM_INVALID};
++    param_t _turtle_param_max{PARAM_INVALID};
++    param_t _turtle_param_ramp{PARAM_INVALID};
++    param_t _turtle_param_time{PARAM_INVALID};
++    uint64_t _turtle_param_last_read{0};
++    bool _turtle_params_ready{false};
++    uORB::Subscription _turtle_rc_sub{ORB_ID(rc_channels)};
++    rc_channels_s _turtle_rc_channels{};
++    param_t _turtle_param_channel{PARAM_INVALID};
++    int32_t _turtle_channel{dragonfly_turtle_rc::default_channel};
++    param_t _turtle_param_angle{PARAM_INVALID};
++    int32_t _turtle_angle_deg{dragonfly_turtle_angle::default_deg};
++    float _turtle_angle_cos{-0.5f};
++    // Cumulative PREVIEW diagnostics. These counters are read by dshot status.
++    // They do not change gating, motor commands, or the recovery state machine.
++    uint32_t _turtle_diag_input_count{0};
++    uint32_t _turtle_diag_input_active{0};
++    uint32_t _turtle_diag_output_count{0};
++    uint32_t _turtle_diag_output_active{0};
++    uint32_t _turtle_diag_output_candidate{0};
++    uint32_t _turtle_diag_output_disarmed{0};
++    uint32_t _turtle_diag_output_cmd_idle{0};
++    uint32_t _turtle_diag_output_all_permit{0};
++    // Read-only Stage 2B1 phase diagnostics.
++    uint32_t _turtle_diag_action_counts[5]{}; // NORMAL, STOP, REVERSE, RESTORE, THROTTLE
++    uint32_t _turtle_diag_phase_counts[6]{}; // IDLE, REVERSE, SETTLE, DRIVE, RESTORE, LOCKED
++    uint32_t _turtle_diag_active_starts{0};
++    uint32_t _turtle_diag_active_exits{0};
++    uint32_t _turtle_diag_last_active_ms{0};
++    uint32_t _turtle_diag_exit_switch{0};
++    uint32_t _turtle_diag_exit_rc{0};
++    uint32_t _turtle_diag_exit_eligibility{0};
++    uint32_t _turtle_diag_exit_timeout{0};
++    uint32_t _turtle_diag_last_loss_bits{0};
++    // Stage 2B1 eligibility snapshot: diagnostic only, no motor output.
++    bool _turtle_diag3_snapshot_valid{false};
++    uint32_t _turtle_diag3_armed_age_ms{0xffffffffu};
++    uint32_t _turtle_diag3_status_age_ms{0xffffffffu};
++    uint32_t _turtle_diag3_status_state{0};
++    bool _turtle_diag3_actuator_armed{false};
++    bool _turtle_diag3_mixer_armed{false};
++    bool _turtle_diag3_lockdown{false};
++    bool _turtle_diag3_manual_lockdown{false};
++    bool _turtle_diag3_force_failsafe{false};
++    uint64_t _turtle_diag_active_since{0};
++
+ 	DShotTelemetry *_telemetry{nullptr};
+ 
+ 	uORB::PublicationMultiData<esc_status_s> esc_status_pub{ORB_ID(esc_status)};
+diff --git a/src/drivers/dshot/DragonflyTurtleAngle.hpp b/src/drivers/dshot/DragonflyTurtleAngle.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..c2aca11974cff582c56496089def1df408817a11
+--- /dev/null
++++ b/src/drivers/dshot/DragonflyTurtleAngle.hpp
+@@ -0,0 +1,20 @@
++// Angle relative to upright for PX4 turtle recovery.
++#pragma once
++#include <cmath>
++#include <cstdint>
++#include <math.h> // NAN: no C++ limits dependency
++namespace dragonfly_turtle_angle {
++constexpr int32_t min_deg=85, max_deg=175, default_deg=120;
++constexpr float to_radians=0.01745329251994329577f;
++inline bool valid(int32_t d) { return d>=min_deg && d<=max_deg; }
++inline float threshold(int32_t d) { return valid(d) ? std::cos(d*to_radians) : NAN; }
++inline bool inverted(const float* q, float limit) {
++    if (!q || !std::isfinite(limit)) return false;
++    const float w=q[0], x=q[1], y=q[2], z=q[3];
++    if (!std::isfinite(w)||!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)) return false;
++    const float norm=w*w+x*x+y*y+z*z;
++    if (!std::isfinite(norm) || norm<0.9f || norm>1.1f) return false;
++    const float proj=1.f-2.f*(x*x+y*y)/norm;
++    return std::isfinite(proj) && proj <= limit;
++}
++} // namespace dragonfly_turtle_angle
+diff --git a/src/drivers/dshot/DragonflyTurtleCore.hpp b/src/drivers/dshot/DragonflyTurtleCore.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..f25cc92a9726706c0355fb5cf779eee3da13beb6
+--- /dev/null
++++ b/src/drivers/dshot/DragonflyTurtleCore.hpp
+@@ -0,0 +1,226 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// 2B8: hardware-independent Quad-X recovery controller. No actuator calls.
++#pragma once
++#include <cmath>
++#include <cstdint>
++#include "ArmingInterlock.hpp"
++namespace dragonfly_trtl {
++enum class Phase : uint8_t { IDLE, HOLD, PRESTOP, REVERSE, SETTLE, DRIVE, POSTSTOP, RESTORE, COOLDOWN, WAIT_OFF, FAULT };
++enum class Action : uint8_t { NORMAL, STOP, REVERSE, RESTORE, THROTTLE };
++enum class Reason : uint8_t { NONE, SWITCH, RC, THROTTLE, UPRIGHT, SAFETY, ARMED, MAPPING, TIMEOUT, CALLBACK_GAP, CLOCK, COMMAND_TIMEOUT };
++inline const char *phase_name(Phase p) {
++    switch(p) {
++    case Phase::IDLE:return "IDLE";case Phase::HOLD:return "HOLD";case Phase::PRESTOP:return "PRESTOP";
++    case Phase::REVERSE:return "REVERSE";case Phase::SETTLE:return "SETTLE";case Phase::DRIVE:return "DRIVE";
++    case Phase::POSTSTOP:return "POSTSTOP";case Phase::RESTORE:return "RESTORE";case Phase::COOLDOWN:return "COOLDOWN";
++    case Phase::WAIT_OFF:return "WAIT_OFF";case Phase::FAULT:return "FAULT";
++    } return "UNKNOWN";
++}
++inline const char *reason_name(Reason r) {
++    switch(r) {
++    case Reason::NONE:return "NONE";case Reason::SWITCH:return "SWITCH";case Reason::RC:return "RC";
++    case Reason::THROTTLE:return "THROTTLE";case Reason::UPRIGHT:return "UPRIGHT";case Reason::SAFETY:return "SAFETY";
++    case Reason::ARMED:return "ARMED";case Reason::MAPPING:return "MAPPING";case Reason::TIMEOUT:return "TIMEOUT";
++    case Reason::CALLBACK_GAP:return "CALLBACK_GAP";case Reason::CLOCK:return "CLOCK";
++    case Reason::COMMAND_TIMEOUT:return "COMMAND_TIMEOUT";
++    } return "UNKNOWN";
++}
++struct Config {
++    int32_t enabled{0}, esc{0}; // ESC=1: explicit user confirmation of compatible temporary 20/21 behavior.
++    int32_t channel{9}, polarity{1};
++    int32_t entry_deg{120}, exit_deg{35};
++    int32_t start{850}, peak{1500}, ramp_ms{250}, drive_ms{1000};
++    int32_t pre_ms{800}, post_ms{1000}, settle_ms{200}, cooldown_ms{300};
++    int32_t deadband_pct{20}, proportional{1}, hold_ms{400};
++    uint32_t outputs{0};
++    bool valid() const {
++        unsigned bits=0; for(uint32_t n=outputs;n;n&=n-1) {++bits;}
++        return (enabled==0||enabled==1) && (esc==0||esc==1) && channel>=1 && channel<=18
++            && (polarity==1||polarity==-1) && entry_deg>=60 && entry_deg<=175
++            && exit_deg>=5 && exit_deg<=80 && exit_deg+10<=entry_deg
++            && start>=1 && start<=1999 && peak>=start && peak<=1999
++            && ramp_ms>=0 && ramp_ms<=1500 && drive_ms>=100 && drive_ms<=3000 && ramp_ms<=drive_ms
++            && pre_ms>=100 && pre_ms<=5000 && post_ms>=200 && post_ms<=5000
++            && settle_ms>=100 && settle_ms<=1000 && cooldown_ms>=100 && cooldown_ms<=2000
++            && deadband_pct>=5 && deadband_pct<=60 && (proportional==0||proportional==1)
++            && hold_ms>=100 && hold_ms<=1000 && bits==4;
++    }
++    bool same(const Config &b) const {
++        return enabled==b.enabled && esc==b.esc && channel==b.channel && polarity==b.polarity
++            && entry_deg==b.entry_deg && exit_deg==b.exit_deg && start==b.start && peak==b.peak
++            && ramp_ms==b.ramp_ms && drive_ms==b.drive_ms && pre_ms==b.pre_ms && post_ms==b.post_ms
++            && settle_ms==b.settle_ms && cooldown_ms==b.cooldown_ms && deadband_pct==b.deadband_pct
++            && proportional==b.proportional && hold_ms==b.hold_ms && outputs==b.outputs;
++    }
++};
++struct Input {
++    bool disarmed{false}, hardware_ok{false}, mapping_ok{false}, rc_ok{false}, throttle_low{false};
++    bool switch_on{false}, switch_off{false}, attitude_ok{false};
++    float vertical{1.f}; // normalized body Z dot earth down; 1 upright, 0 side-on, -1 inverted.
++    uint32_t selected{0};
++    float strength{0.f}; // max absolute roll/pitch, validated to [0,1].
++};
++struct Frame { Action action{Action::NORMAL}; uint32_t outputs{0}; uint16_t level{0}; };
++class Core {
++public:
++    explicit Core(Interlock &lock):_lock(lock) {}
++    Phase phase{Phase::IDLE}; Reason reason{Reason::NONE};
++    uint32_t attempts{0}, restore_sequences_sent{0};
++    uint32_t reverse_frames{0}, restore_frames{0}, throttle_frames{0};
++    uint32_t last_drive_ms{0};
++    bool configured() const { return _configured; }
++    bool busy() const { return phase!=Phase::IDLE; }
++    bool owns_outputs() const { return _owned; }
++    bool synced() const { return _synced; }
++    bool enabled() const { return _configured && _cfg.enabled==1 && _cfg.esc==1; }
++    const Config &config() const { return _cfg; }
++    bool configure(const Config &cfg) {
++        if(busy() || !cfg.valid()) { return false; }
++        if(_configured && _cfg.same(cfg)) { return true; }
++        const bool resync = !_configured || _cfg.outputs!=cfg.outputs || _cfg.esc!=cfg.esc
++            || _cfg.enabled!=cfg.enabled;
++        _cfg=cfg; _configured=true; _off_since=0; _off_qualified=false;
++        if(resync) {_synced=false; _lock.set_ready(false);}
++        _entry_cos=std::cos(float(cfg.entry_deg)*0.017453292519943295f);
++        _exit_cos=std::cos(float(cfg.exit_deg)*0.017453292519943295f);
++        return true;
++    }
++    void invalidate() { if(!busy()) { _configured=false; _synced=false; _off_qualified=false; _lock.set_ready(false); } }
++    void fault(Reason why) { reason=why; phase=Phase::FAULT; _lock.latch_fault(); _owned=true; }
++    Frame step(uint64_t now,const Input &in) {
++        if(phase==Phase::FAULT) {return stop();}
++        if(!_configured || !enabled()) {return {};}
++        const uint64_t dt=_last?now-_last:0;
++        if(_last && now<_last) { if(_owned) {fault(Reason::CLOCK);return stop();} _off_qualified=false;_off_since=0; }
++        else if(_last && dt>100000 && drive_side()) { abort(now,Reason::CALLBACK_GAP); }
++        _last=now;
++        if(_owned && !in.mapping_ok) {fault(Reason::MAPPING);return stop();}
++        if(_owned && !in.disarmed) { abort(now,Reason::ARMED); }
++        // Startup normalization: wait, send temporary NORMAL, then require switch OFF.
++        // No assertion that the ESC accepted the commands is made.
++        if(phase==Phase::IDLE && !_synced) {
++            _lock.set_ready(false);
++            if(!in.mapping_ok || !in.disarmed || !in.hardware_ok || !_lock.acquire_recovery()) {return {};}
++            _owned=true;_startup=true;_since=now;_transaction_start=now;phase=Phase::POSTSTOP;
++        }
++        if(phase==Phase::IDLE) {
++            if(!in.disarmed || !in.hardware_ok || !in.mapping_ok || !in.rc_ok || !in.throttle_low) {
++                _off_since=0;_off_qualified=false;return {};
++            }
++            if(in.switch_off) {
++                if(!_off_since) {_off_since=now;}
++                if(now>=_off_since && now-_off_since>=release_us) {_off_qualified=true;}
++                return {};
++            }
++            if(!in.switch_on) {_off_since=0;return {};}
++            // Consume the OFF->ON request even if the start attitude is wrong.
++            // Leaving the switch ON and later disarming/tilting cannot launch recovery.
++            const bool edge=_off_qualified;_off_qualified=false;_off_since=0;
++            if(!edge || !in.attitude_ok || in.vertical>_entry_cos || !_lock.acquire_recovery()) {return {};}
++            _owned=true;_startup=false;phase=Phase::HOLD;_since=now;_transaction_start=now;reason=Reason::NONE;
++            _lock.set_ready(false);
++        }
++        if(drive_side()) {
++            Reason why=Reason::NONE;
++            if(!in.disarmed) {why=Reason::ARMED;}
++            else if(!in.hardware_ok || !in.mapping_ok) {why=Reason::SAFETY;}
++            else if(!in.rc_ok) {why=Reason::RC;}
++            else if(!in.switch_on) {why=Reason::SWITCH;}
++            else if(!in.throttle_low) {why=Reason::THROTTLE;}
++            else if(!in.attitude_ok) {why=Reason::SAFETY;}
++            else if((phase==Phase::HOLD && in.vertical>_entry_cos) || in.vertical>=_exit_cos) {why=Reason::UPRIGHT;}
++            if(why!=Reason::NONE) {abort(now,why);}
++        }
++        // Fail closed on an incomplete restoration or a stalled callback schedule.
++        // Budget is derived from settings, not a hidden two-second outer timer.
++        if(_owned && phase!=Phase::WAIT_OFF && now>=_transaction_start
++            && now-_transaction_start>transaction_budget_us()) {fault(Reason::COMMAND_TIMEOUT);return stop();}
++        switch(phase) {
++        case Phase::IDLE:return {};
++        case Phase::HOLD:
++            if(elapsed(now,ms(_cfg.hold_ms))) {phase=Phase::PRESTOP;_since=now;++attempts;}
++            return stop();
++        case Phase::PRESTOP:
++            if(!elapsed(now,ms(_cfg.pre_ms))) {return stop();}
++            begin_command(Phase::REVERSE,now);
++            return command(now,true);
++        case Phase::REVERSE:return command(now,true);
++        case Phase::SETTLE:
++            if(!elapsed(now,ms(_cfg.settle_ms))) {return stop();}
++            phase=Phase::DRIVE;_since=now;_drive_start=now;_selection_since=now;_selected=0;
++            return drive(now,in);
++        case Phase::DRIVE:return drive(now,in);
++        case Phase::POSTSTOP:
++            // Reset dwell whenever a stop/calibration/test condition prevents restoration.
++            if(!in.disarmed || !in.hardware_ok) {_since=now;return stop();}
++            if(!elapsed(now,ms(_cfg.post_ms))) {return stop();}
++            begin_command(Phase::RESTORE,now);
++            return command(now,false);
++        case Phase::RESTORE:
++            if(!in.disarmed || !in.hardware_ok) {phase=Phase::POSTSTOP;_since=now;return stop();}
++            return command(now,false);
++        case Phase::COOLDOWN:
++            if(!in.disarmed || !in.hardware_ok) {phase=Phase::POSTSTOP;_since=now;return stop();}
++            if(elapsed(now,ms(_cfg.cooldown_ms))) {phase=Phase::WAIT_OFF;_off_since=0;}
++            return stop();
++        case Phase::WAIT_OFF:
++            if(!in.disarmed || !in.hardware_ok || !in.mapping_ok || !in.rc_ok || !in.throttle_low || !in.switch_off) {
++                _off_since=0;return stop();
++            }
++            if(!_off_since) {_off_since=now;return stop();}
++            if(now>=_off_since && now-_off_since>=release_us) {
++                _synced=true;_owned=false;_startup=false;phase=Phase::IDLE;_off_qualified=true;
++                _lock.set_ready(true);_lock.release_recovery();return {};
++            }
++            return stop();
++        case Phase::FAULT:return stop();
++        }
++        return stop();
++    }
++private:
++    static constexpr uint64_t release_us=300000, command_dwell_us=50000, command_timeout_us=2000000;
++    static constexpr uint32_t command_min_frames=24;
++    Interlock &_lock; Config _cfg{};
++    bool _configured{false},_synced{false},_owned{false},_startup{false},_off_qualified{false};
++    uint64_t _last{0},_since{0},_transaction_start{0},_off_since{0},_drive_start{0},_selection_since{0};
++    uint32_t _count{0},_selected{0}; float _entry_cos{-0.5f},_exit_cos{0.81915f};
++    static uint64_t ms(int32_t v) {return uint64_t(v)*1000;}
++    bool elapsed(uint64_t now,uint64_t duration) const {return now>=_since && now-_since>=duration;}
++    static Frame stop() {return {Action::STOP,0,0};}
++    bool drive_side() const {return phase==Phase::HOLD || phase==Phase::PRESTOP || phase==Phase::REVERSE || phase==Phase::SETTLE || phase==Phase::DRIVE;}
++    void abort(uint64_t now,Reason why) {
++        if(!drive_side()) {return;}
++        if(phase==Phase::DRIVE) {last_drive_ms=uint32_t((now-_drive_start)/1000);}
++        reason=why;phase=Phase::POSTSTOP;_since=now;_selected=0;_count=0;
++    }
++    uint64_t transaction_budget_us() const {
++        return ms(_cfg.hold_ms+_cfg.pre_ms+_cfg.settle_ms+_cfg.drive_ms+_cfg.post_ms+_cfg.cooldown_ms)
++            +2*command_timeout_us+2000000;
++    }
++    void begin_command(Phase p,uint64_t now) {phase=p;_since=now;_count=0;}
++    Frame command(uint64_t now,bool reverse) {
++        if(elapsed(now,command_timeout_us)) {fault(Reason::COMMAND_TIMEOUT);return stop();}
++        ++_count;
++        if(reverse) {++reverse_frames;} else {++restore_frames;}
++        if(_count>=command_min_frames && elapsed(now,command_dwell_us)) {
++            phase=reverse?Phase::SETTLE:Phase::COOLDOWN;_since=now;
++            if(!reverse) {++restore_sequences_sent;}
++        }
++        return {reverse?Action::REVERSE:Action::RESTORE,_cfg.outputs,0};
++    }
++    Frame drive(uint64_t now,const Input &in) {
++        if(elapsed(now,ms(_cfg.drive_ms))) {last_drive_ms=uint32_t((now-_drive_start)/1000);abort(now,Reason::TIMEOUT);return stop();}
++        const uint32_t selected=in.selected&_cfg.outputs;
++        if(!selected || !std::isfinite(in.strength)) {_selected=0;_selection_since=now;return stop();}
++        if(selected!=_selected) {_selected=selected;_selection_since=now;}
++        const float db=float(_cfg.deadband_pct)*0.01f;
++        float fraction=(in.strength-db)/(1.f-db);
++        if(fraction<0.f) {fraction=0.f;} if(fraction>1.f) {fraction=1.f;}
++        const uint16_t target=_cfg.proportional?uint16_t(_cfg.start+float(_cfg.peak-_cfg.start)*fraction):uint16_t(_cfg.peak);
++        const uint64_t ramp=ms(_cfg.ramp_ms),since=now-_selection_since;
++        const uint16_t cap=(!ramp||since>=ramp)?uint16_t(_cfg.peak):uint16_t(_cfg.start+(uint64_t(_cfg.peak-_cfg.start)*since)/ramp);
++        ++throttle_frames;
++        return {Action::THROTTLE,selected,target<cap?target:cap};
++    }
++};
++} // namespace dragonfly_trtl
+diff --git a/src/drivers/dshot/DragonflyTurtleInput.hpp b/src/drivers/dshot/DragonflyTurtleInput.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..64b1555fa495a839afe6bef28c08a82867717d7e
+--- /dev/null
++++ b/src/drivers/dshot/DragonflyTurtleInput.hpp
+@@ -0,0 +1,33 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++#include <cmath>
++#include <cstdint>
++#include <cstddef>
++namespace dragonfly_trtl {
++inline bool fresh(uint64_t now,uint64_t stamp,uint64_t limit) {
++    return stamp && now>=stamp && now-stamp<limit;
++}
++inline float vertical(const float q[4]) {
++    const float n=q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3];
++    if(!std::isfinite(n) || n<0.9f || n>1.1f) {return NAN;}
++    return 1.f-2.f*(q[1]*q[1]+q[2]*q[2])/n;
++}
++inline bool rc_conflict(const int8_t *functions,size_t count,int channel) {
++    if(channel<1 || channel>18 || !functions) {return true;}
++    for(size_t i=0;i<count;++i) {
++        // Only generic AUX1..AUX6 sharing is permitted. All other mapped functions conflict.
++        if(i>=8 && i<=13) {continue;}
++        if(functions[i]==channel-1) {return true;}
++    }
++    return false;
++}
++inline bool quad_corner(unsigned c,float x,float y,float ax,float ay,float az) {
++    if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(ax)||!std::isfinite(ay)||!std::isfinite(az)) {return false;}
++    const float norm=std::sqrt(ax*ax+ay*ay+az*az);
++    if(!std::isfinite(norm) || norm<0.000001f) {return false;}
++    ax/=norm;ay/=norm;az/=norm;
++    const bool front=c<2, right=c==1||c==3;
++    return (front?x>0.0001f:x< -0.0001f) && (right?y>0.0001f:y< -0.0001f)
++        && std::fabs(ax)<0.01f && std::fabs(ay)<0.01f && az< -0.99f;
++}
++} // namespace dragonfly_trtl
+diff --git a/src/drivers/dshot/DragonflyTurtleMapping.hpp b/src/drivers/dshot/DragonflyTurtleMapping.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..9b3926ea45dd5d270d0228a7339b2baff0ab753c
+--- /dev/null
++++ b/src/drivers/dshot/DragonflyTurtleMapping.hpp
+@@ -0,0 +1,98 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Configurable Quad-X corner -> PX4 logical motor -> local DShot output mapping.
++// No actuator calls. Output slots are zero based internally, motor IDs are 1 based.
++#pragma once
++#include <cmath>
++#include <cstddef>
++#include <cstdint>
++
++namespace dragonfly_mapping {
++enum Corner : uint8_t { FL = 0, FR = 1, RL = 2, RR = 3 };
++enum class Error : uint8_t {
++    NONE, UNCONFIGURED, MOTOR_ID, DUPLICATE_MOTOR, OUTPUT_COUNT,
++    MISSING_OUTPUT, DUPLICATE_OUTPUT, EXTRA_FUNCTION, INACTIVE_OUTPUT
++};
++inline const char *error_name(Error e) {
++    switch (e) {
++    case Error::NONE: return "OK";
++    case Error::UNCONFIGURED: return "UNCONFIGURED";
++    case Error::MOTOR_ID: return "MOTOR_ID";
++    case Error::DUPLICATE_MOTOR: return "DUPLICATE_MOTOR";
++    case Error::OUTPUT_COUNT: return "OUTPUT_COUNT";
++    case Error::MISSING_OUTPUT: return "MISSING_OUTPUT";
++    case Error::DUPLICATE_OUTPUT: return "DUPLICATE_OUTPUT";
++    case Error::EXTRA_FUNCTION: return "EXTRA_FUNCTION";
++    case Error::INACTIVE_OUTPUT: return "INACTIVE_OUTPUT";
++    }
++    return "UNKNOWN";
++}
++struct Config { int32_t motor[4]{0, 0, 0, 0}; };
++struct Resolved {
++    uint32_t corner[4]{0, 0, 0, 0};
++    uint32_t all{0};
++    Error error{Error::UNCONFIGURED};
++    bool valid() const { return error == Error::NONE; }
++};
++inline Error validate(const Config &cfg) {
++    for (unsigned i = 0; i < 4; ++i) {
++        if (cfg.motor[i] == 0) { return Error::UNCONFIGURED; }
++        // This release is deliberately restricted to one four-motor vehicle.
++        if (cfg.motor[i] < 1 || cfg.motor[i] > 4) { return Error::MOTOR_ID; }
++        for (unsigned j = 0; j < i; ++j) {
++            if (cfg.motor[i] == cfg.motor[j]) { return Error::DUPLICATE_MOTOR; }
++        }
++    }
++    return Error::NONE;
++}
++inline Resolved resolve(const Config &cfg, const int32_t *functions,
++                        size_t count, uint32_t active_outputs) {
++    Resolved r;
++    r.error = validate(cfg);
++    if (!r.valid()) { return r; }
++    if (!functions || count == 0 || count > 32) { r.error = Error::OUTPUT_COUNT; return r; }
++    // Only disabled outputs or precisely Motor 1..4 may share this DShot instance.
++    for (size_t slot = 0; slot < count; ++slot) {
++        const int32_t fn = functions[slot];
++        if (fn == 0) { continue; }
++        unsigned corner = 4;
++        for (unsigned c = 0; c < 4; ++c) {
++            if (fn == 100 + cfg.motor[c]) { corner = c; break; }
++        }
++        if (corner == 4) { r.error = Error::EXTRA_FUNCTION; return r; }
++        const uint32_t bit = uint32_t{1} << slot;
++        if (!(active_outputs & bit)) { r.error = Error::INACTIVE_OUTPUT; return r; }
++        if (r.corner[corner]) { r.error = Error::DUPLICATE_OUTPUT; return r; }
++        r.corner[corner] = bit;
++        r.all |= bit;
++    }
++    for (unsigned c = 0; c < 4; ++c) {
++        if (!r.corner[c]) { r.error = Error::MISSING_OUTPUT; return r; }
++    }
++    r.error = Error::NONE;
++    return r;
++}
++inline bool same(const Resolved &a, const Resolved &b) {
++    if (!a.valid() || !b.valid() || a.all != b.all) { return false; }
++    for (unsigned i = 0; i < 4; ++i) { if (a.corner[i] != b.corner[i]) { return false; } }
++    return true;
++}
++inline uint32_t select(const Resolved &map, float roll, float pitch, float deadband = 0.35f) {
++    if (!map.valid() || !std::isfinite(roll) || !std::isfinite(pitch)
++        || std::fabs(roll) > 1.05f || std::fabs(pitch) > 1.05f) { return 0; }
++    if (!std::isfinite(deadband) || deadband < 0.05f || deadband > 0.6f) { return 0; }
++    uint32_t mask = map.all;
++    bool selected = false;
++    if (roll > deadband) { mask &= map.corner[FR] | map.corner[RR]; selected = true; }
++    else if (roll < -deadband) { mask &= map.corner[FL] | map.corner[RL]; selected = true; }
++    // Preserve Dragonfly's tested convention: +pitch selects front motors.
++    if (pitch > deadband) { mask &= map.corner[FL] | map.corner[FR]; selected = true; }
++    else if (pitch < -deadband) { mask &= map.corner[RL] | map.corner[RR]; selected = true; }
++    return selected ? mask : 0;
++}
++inline unsigned output_number(uint32_t single_bit) {
++    if (!single_bit || (single_bit & (single_bit - 1))) { return 0; }
++    unsigned n = 1;
++    while ((single_bit >>= 1) != 0) { ++n; }
++    return n;
++}
++} // namespace dragonfly_mapping
+diff --git a/src/drivers/dshot/DragonflyTurtleMotor.hpp b/src/drivers/dshot/DragonflyTurtleMotor.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..5e4a4272f0230e19daeaec12e07a7eeab32dcaef
+--- /dev/null
++++ b/src/drivers/dshot/DragonflyTurtleMotor.hpp
+@@ -0,0 +1,229 @@
++// Dragonfly 2B7: repeatable AM32 recovery with latched PX4 parameter limits.
++// Bench candidate: no ESC acknowledgement is available for direction restoration.
++#pragma once
++#include <cstdint>
++
++#define DRAGONFLY_TURTLE_MOTOR_OUTPUT_ENABLED 1
++
++namespace dragonfly_motor
++{
++// Keep existing enum indices 0..5 stable for cumulative Stage 2B1 diagnostics.
++enum class Phase : uint8_t {
++    IDLE = 0, REVERSE = 1, SETTLE = 2, DRIVE = 3, RESTORE = 4, LOCKED = 5,
++    PRESTOP = 6, POSTSTOP = 7, COOLDOWN = 8, WAIT_RELEASE = 9
++};
++enum class Action : uint8_t { NORMAL, STOP, REVERSE_COMMAND, RESTORE_COMMAND, THROTTLE };
++
++inline const char *phase_name(Phase p)
++{
++    switch (p) {
++    case Phase::IDLE: return "IDLE";
++    case Phase::PRESTOP: return "PRESTOP";
++    case Phase::REVERSE: return "REVERSE";
++    case Phase::SETTLE: return "SETTLE";
++    case Phase::DRIVE: return "DRIVE";
++    case Phase::POSTSTOP: return "POSTSTOP";
++    case Phase::RESTORE: return "RESTORE";
++    case Phase::COOLDOWN: return "COOLDOWN";
++    case Phase::WAIT_RELEASE: return "WAIT_RELEASE";
++    case Phase::LOCKED: return "LOCKED";
++    }
++    return "UNKNOWN";
++}
++inline const char *action_name(Action a)
++{
++    switch (a) {
++    case Action::NORMAL: return "NORMAL";
++    case Action::STOP: return "STOP";
++    case Action::REVERSE_COMMAND: return "REVERSE_21";
++    case Action::RESTORE_COMMAND: return "RESTORE_20";
++    case Action::THROTTLE: return "THROTTLE";
++    }
++    return "UNKNOWN";
++}
++struct Frame {
++    Action action{Action::NORMAL};
++    uint32_t output_mask{0};
++    uint16_t level{0};
++};
++
++class Sequencer
++{
++public:
++    static constexpr int command_frames = 24;       // ESC requires >=6 valid matching commands
++    static constexpr uint64_t prestop_us = 150000;   // settled before reverse command
++    static constexpr uint64_t settle_us = 150000;    // stopped before power
++    static constexpr uint64_t drive_cap_us = 1000000; // hard max 1 s motor driving
++    static constexpr uint64_t poststop_us = 600000;  // let coasting motors stop before restore
++    static constexpr uint64_t cooldown_us = 250000;
++    static constexpr uint64_t release_hold_us = 250000;
++    static constexpr uint64_t ramp_us = 250000;
++    // PX4 DShot driver uses 1..1999 command range, not physical torque percentage.
++    static constexpr uint16_t start_level = 850;
++    static constexpr uint16_t max_level = 1500;       // bounded stronger default
++
++    // Hard bounds independent of QGroundControl metadata. Configuration is accepted
++    // only while IDLE, and is therefore latched for each recovery attempt.
++    static constexpr uint16_t hard_min_start = 1;
++    static constexpr uint16_t hard_max_start = 1999;
++    static constexpr uint16_t hard_min_max = 1;
++    static constexpr uint16_t hard_max_max = 1999;
++    static constexpr uint32_t hard_min_ramp_ms = 0;
++    static constexpr uint32_t hard_max_ramp_ms = 1500;
++    static constexpr uint32_t hard_min_drive_ms = 100;
++    static constexpr uint32_t hard_max_drive_ms = 1500;
++
++    // Map remains latched through reverse, drive, restore and switch release.
++    bool configure_outputs(uint32_t mask)
++    {
++        if (phase != Phase::IDLE || flight_inhibited) { return false; }
++        unsigned bits = 0;
++        for (uint32_t n = mask; n; n &= n - 1) { ++bits; }
++        if (bits != 4) { return false; }
++        _mapped_outputs = mask;
++        return true;
++    }
++    uint32_t configured_outputs() const { return _mapped_outputs; }
++
++    bool configure(int32_t requested_start, int32_t requested_max,
++                   int32_t requested_ramp_ms, int32_t requested_drive_ms)
++    {
++        if (phase != Phase::IDLE || flight_inhibited) { return false; }
++        _max_level = limit(requested_max, hard_min_max, hard_max_max);
++        _start_level = limit(requested_start, hard_min_start, hard_max_start);
++        if (_start_level > _max_level) { _start_level = _max_level; }
++        _ramp_us = static_cast<uint64_t>(limit(requested_ramp_ms, hard_min_ramp_ms, hard_max_ramp_ms)) * 1000;
++        _drive_cap_us = static_cast<uint64_t>(limit(requested_drive_ms, hard_min_drive_ms, hard_max_drive_ms)) * 1000;
++        return true;
++    }
++
++    uint16_t configured_start() const { return _start_level; }
++    uint16_t configured_max() const { return _max_level; }
++    uint32_t configured_ramp_ms() const { return static_cast<uint32_t>(_ramp_us / 1000); }
++    uint32_t configured_drive_ms() const { return static_cast<uint32_t>(_drive_cap_us / 1000); }
++
++    Phase phase{Phase::IDLE};
++    bool flight_inhibited{false};
++    uint32_t attempts{0};
++    uint32_t restorations_sent{0}; // count sequences SENT, not ESC acknowledgements
++
++    Frame step(uint64_t now, bool eligible, uint32_t selected_mask,
++               bool disarmed, bool commands_idle, bool release_ok)
++    {
++        selected_mask &= _mapped_outputs;
++        const bool permit = eligible && disarmed && commands_idle && _mapped_outputs != 0;
++
++        if (phase == Phase::IDLE) {
++            if (!permit) { return {}; }
++            flight_inhibited = true;
++            ++attempts;
++            phase = Phase::PRESTOP;
++            _since = now;
++            _count = 0;
++        }
++
++        // Immediate output STOP on cancellation. Restoration follows after motors coast down.
++        if (!permit && (phase == Phase::PRESTOP || phase == Phase::REVERSE
++                        || phase == Phase::SETTLE || phase == Phase::DRIVE)) {
++            phase = Phase::POSTSTOP;
++            _since = now;
++            _count = 0;
++        }
++
++        switch (phase) {
++        case Phase::PRESTOP:
++            if (!elapsed(now, prestop_us)) { return stop(); }
++            phase = Phase::REVERSE;
++            _count = 0;
++            // fall through, first reverse frame on this call
++            [[fallthrough]];
++        case Phase::REVERSE: {
++            Frame f{Action::REVERSE_COMMAND, _mapped_outputs, 0};
++            if (++_count >= command_frames) {
++                phase = Phase::SETTLE;
++                _since = now;
++            }
++            return f;
++        }
++        case Phase::SETTLE:
++            if (!elapsed(now, settle_us)) { return stop(); }
++            phase = Phase::DRIVE;
++            _since = now;
++            // fall through into bounded motor-driving period
++            [[fallthrough]];
++        case Phase::DRIVE:
++            if (!elapsed_valid(now) || elapsed(now, _drive_cap_us)) {
++                phase = Phase::POSTSTOP;
++                _since = now;
++                return stop();
++            }
++            return selected_mask ? Frame{Action::THROTTLE, selected_mask, ramp_level(now - _since)}
++                   : stop();
++        case Phase::POSTSTOP:
++            if (!elapsed(now, poststop_us)) { return stop(); }
++            phase = Phase::RESTORE;
++            _count = 0;
++            // fall through to issue the first restore command
++            [[fallthrough]];
++        case Phase::RESTORE: {
++            Frame f{Action::RESTORE_COMMAND, _mapped_outputs, 0};
++            if (++_count >= command_frames) {
++                ++restorations_sent;
++                phase = Phase::COOLDOWN;
++                _since = now;
++            }
++            return f;
++        }
++        case Phase::COOLDOWN:
++            if (elapsed(now, cooldown_us)) {
++                phase = Phase::WAIT_RELEASE;
++                _release_since = 0;
++            }
++            return stop();
++        case Phase::WAIT_RELEASE:
++            if (!release_ok || !disarmed || !commands_idle) {
++                _release_since = 0;
++                return stop();
++            }
++            if (_release_since == 0) { _release_since = now; return stop(); }
++            if (now < _release_since) { _release_since = 0; return stop(); }
++            if (now - _release_since < release_hold_us) { return stop(); }
++            // The restore commands have been SENT, not independently acknowledged by ESCs.
++            // Re-enable normal PX4 output only with RC-valid switch OFF / low throttle / disarmed.
++            flight_inhibited = false;
++            phase = Phase::IDLE;
++            _release_since = 0;
++            return {};
++        case Phase::LOCKED:
++            return stop();
++        case Phase::IDLE:
++            return {};
++        }
++        return stop();
++    }
++
++private:
++    uint32_t _mapped_outputs{0};
++    uint16_t _start_level{start_level};
++    uint16_t _max_level{max_level};
++    uint64_t _ramp_us{ramp_us};
++    uint64_t _drive_cap_us{drive_cap_us};
++    uint32_t _count{0};
++    uint64_t _since{0};
++    uint64_t _release_since{0};
++
++    static uint16_t limit(int32_t v, int32_t lo, int32_t hi)
++    {
++        return static_cast<uint16_t>(v < lo ? lo : (v > hi ? hi : v));
++    }
++    static Frame stop() { return {Action::STOP, 0, 0}; }
++    bool elapsed_valid(uint64_t now) const { return now >= _since; }
++    bool elapsed(uint64_t now, uint64_t us) const { return now >= _since && now - _since >= us; }
++    uint16_t ramp_level(uint64_t elapsed_us) const
++    {
++        if (elapsed_us >= _ramp_us) { return _max_level; }
++        return static_cast<uint16_t>(_start_level +
++            (static_cast<uint64_t>(_max_level - _start_level) * elapsed_us) / _ramp_us);
++    }
++};
++} // namespace dragonfly_motor
+diff --git a/src/drivers/dshot/DragonflyTurtleRc.hpp b/src/drivers/dshot/DragonflyTurtleRc.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..4923ca0011a8e93630dafe2c5a1fee75cf531950
+--- /dev/null
++++ b/src/drivers/dshot/DragonflyTurtleRc.hpp
+@@ -0,0 +1,42 @@
++// PX4 FPV Extensions: RC channel selection for Dragonfly recovery.
++// Experimental extension; do not use without hardware-specific review.
++#pragma once
++
++#include <cmath>
++#include <cstdint>
++#include <math.h> // NAN without the unavailable C++ <limits> header
++
++namespace dragonfly_turtle_rc
++{
++static constexpr int32_t min_channel = 1; // actual function assignments are checked separately
++static constexpr int32_t max_channel = 18;
++static constexpr int32_t default_channel = 9;
++static constexpr uint64_t max_age_us = 300000;
++
++inline bool healthy(uint64_t now, uint64_t timestamp, uint64_t last_valid,
++                    bool signal_lost)
++{
++    // Some PX4 RC publishers leave timestamp_last_valid at zero. The primary
++    // timestamp and signal_lost still have to pass; zero is not a freshness
++    // bypass. When a nonzero last-valid timestamp is supplied, check it too.
++    // The caller separately requires fresh, valid RC-origin manual input.
++    if (signal_lost || timestamp == 0 || now < timestamp
++        || now - timestamp >= max_age_us) {
++        return false;
++    }
++    return last_valid == 0
++           || (now >= last_valid && now - last_valid < max_age_us);
++}
++
++inline float select(const float *values, uint8_t count, int32_t channel)
++{
++    if (!values || channel < min_channel || channel > max_channel || count < channel) {
++        return NAN;
++    }
++    const float value = values[channel - 1];
++    return std::isfinite(value) ? value : NAN;
++}
++
++inline bool on(float value) { return std::isfinite(value) && value > 0.7f; }
++inline bool off(float value) { return std::isfinite(value) && value < 0.3f; }
++} // namespace dragonfly_turtle_rc
+diff --git a/src/drivers/dshot/DragonflyTurtleTimer.hpp b/src/drivers/dshot/DragonflyTurtleTimer.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..57267229a9fe341e6bea39f4e83469b2d4847f21
+--- /dev/null
++++ b/src/drivers/dshot/DragonflyTurtleTimer.hpp
+@@ -0,0 +1,63 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++#include <cstdint>
++namespace dragonfly_turtle {
++enum class State : uint8_t { IDLE, HOLD, ACTIVE, LOCKOUT };
++
++inline const char *state_name(State s)
++{
++    switch (s) {
++    case State::IDLE: return "IDLE";
++    case State::HOLD: return "HOLD";
++    case State::ACTIVE: return "ACTIVE";
++    case State::LOCKOUT: return "LOCKOUT";
++    }
++    return "UNKNOWN";
++}
++
++struct RecoveryTimer
++{
++    static constexpr uint64_t hold_us = 400000;       // 0.4 s continuous eligibility
++    static constexpr uint64_t max_active_us = 2000000; // 2.0 s simulated active window
++
++    State state{State::IDLE};
++    uint64_t since{0};
++
++    // rc_ok must be independent of the derived switch_on value.
++    // After loss of eligibility during HOLD/ACTIVE, require an observed RC-valid switch OFF.
++    void update(uint64_t now, bool rc_ok, bool switch_on, bool candidate)
++    {
++        if (rc_ok && !switch_on) {
++            state = State::IDLE;
++            since = 0;
++            return;
++        }
++        if (state == State::LOCKOUT) { return; }
++
++        if (!rc_ok || !candidate) {
++            if (state == State::HOLD || state == State::ACTIVE) {
++                state = State::LOCKOUT;
++            } else {
++                state = State::IDLE;
++            }
++            since = 0;
++            return;
++        }
++
++        if (state == State::IDLE) {
++            state = State::HOLD;
++            since = now;
++        } else if (state == State::HOLD) {
++            if (now < since) { state = State::LOCKOUT; since = 0; }
++            else if (now - since >= hold_us) { state = State::ACTIVE; since = now; }
++        } else if (state == State::ACTIVE) {
++            if (now < since || now - since >= max_active_us) {
++                state = State::LOCKOUT;
++                since = 0;
++            }
++        }
++    }
++
++    bool simulated_active() const { return state == State::ACTIVE; }
++};
++} // namespace dragonfly_turtle
+diff --git a/src/drivers/dshot/module.yaml b/src/drivers/dshot/module.yaml
+index e2dcf8bc97e8ac396b5ff50ed0c1a9c70c3d5813..8b4b8b1e8a01e410d0ed8fd719b274e9bb256e98 100644
+--- a/src/drivers/dshot/module.yaml
++++ b/src/drivers/dshot/module.yaml
+@@ -74,3 +74,205 @@ parameters:
+                     Typical motors for 5 inch props have 14 poles.
+             type: int32
+             default: 14
++
++    - group: Dragonfly Turtle
++      definitions:
++        TRTL_EN:
++            description:
++                short: "Enable experimental Quad-X turtle recovery"
++                long: |
++                    Enable only after mapping and verifying the ESC profile. Commander rejects arming until startup restoration is sent and the switch has been released. This feature intentionally permits motor output while disarmed.
++            type: int32
++            min: 0
++            max: 1
++            default: 0
++        TRTL_ESC:
++            description:
++                short: "Verified temporary-direction ESC profile"
++                long: |
++                    0 unconfigured. Set 1 only after verifying your exact ESC firmware supports temporary relative DShot 21 reverse and 20 normal, including repeated commands while stopped. No ESC settings are saved. This is an acknowledgement by the operator, not automatic ESC detection.
++            type: int32
++            min: 0
++            max: 1
++            default: 0
++        TRTL_CH:
++            description:
++                short: "Turtle receiver channel"
++                long: |
++                    One-based calibrated receiver channel. It must not share roll, pitch, yaw, throttle, arm, kill, flight mode, parameter tuning or other critical functions. Generic AUX sharing is allowed. RC source only.
++            type: int32
++            min: 1
++            max: 18
++            default: 9
++        TRTL_POL:
++            description:
++                short: "Turtle switch polarity"
++                long: |
++                    Use 1 for high=ON or -1 for low=ON. Zero is invalid. After polarity, ON is above 0.7 and OFF is below -0.3; center stops recovery but does not reset the switch handshake.
++            type: int32
++            min: -1
++            max: 1
++            default: 1
++        TRTL_ANGLE:
++            description:
++                short: "Minimum tilt to START recovery"
++                long: |
++                    Degrees away from upright. Entry needs a fresh OFF to ON request followed by a hold. 85 allows a nominal 90-degree side-on start. Must be at least EXIT plus 10 degrees. This is not proof that the aircraft is on the ground.
++            type: int32
++            min: 60
++            max: 175
++            default: 120
++            unit: "deg"
++        TRTL_EXIT:
++            description:
++                short: "Tilt at which recovery STOPS"
++                long: |
++                    Separate threshold from ANGLE. Once started, a flip can continue through the entry angle until it reaches this near-upright tilt or another stop condition. Must be at least 10 degrees below ANGLE.
++            type: int32
++            min: 5
++            max: 80
++            default: 35
++            unit: "deg"
++        TRTL_MIN:
++            description:
++                short: "Starting recovery motor command"
++                long: |
++                    PX4 non-stop DShot command units, not measured RPM, thrust or percent power. Must not exceed MAX. Defaults retain the Dragonfly development profile and are not universal recommendations.
++            type: int32
++            min: 1
++            max: 1999
++            default: 850
++        TRTL_MAX:
++            description:
++                short: "Maximum recovery motor command"
++                long: |
++                    PX4 DShot command units. Full stick reaches this target in proportional mode. Verify reverse thrust, motor start, current and heating for the actual propulsion system.
++            type: int32
++            min: 1
++            max: 1999
++            default: 1500
++        TRTL_RAMP:
++            description:
++                short: "Recovery upward ramp time"
++                long: |
++                    Ramps the output cap from MIN to MAX. Reset when the selected motor set changes or the stick is centered. Must not exceed TIME. Zero disables the ramp.
++            type: int32
++            min: 0
++            max: 1500
++            default: 250
++            unit: "ms"
++        TRTL_TIME:
++            description:
++                short: "Maximum DRIVE phase duration"
++                long: |
++                    Starts when the motor-driving phase begins, not during reverse or settling. Motor stopping and restore phases have a separate derived transaction budget.
++            type: int32
++            min: 100
++            max: 3000
++            default: 1000
++            unit: "ms"
++        TRTL_PRE:
++            description:
++                short: "Stop time before reverse commands"
++                long: |
++                    Time spent transmitting stop before temporary reversal. Choose from measured coast-down on the actual motor and propeller; this is not RPM confirmation.
++            type: int32
++            min: 100
++            max: 5000
++            default: 800
++            unit: "ms"
++        TRTL_POST:
++            description:
++                short: "Stop time before restore commands"
++                long: |
++                    Time spent transmitting stop before normal-direction restore. Increase for slower-stopping propulsion. A fixed delay does not prove the motor stopped.
++            type: int32
++            min: 200
++            max: 5000
++            default: 1000
++            unit: "ms"
++        TRTL_SETTLE:
++            description:
++                short: "Stop time after reversal commands"
++                long: |
++                    Stopped interval after a reverse command train, before drive.
++            type: int32
++            min: 100
++            max: 1000
++            default: 200
++            unit: "ms"
++        TRTL_COOL:
++            description:
++                short: "Cooldown after restore commands"
++                long: |
++                    Stopped interval after restore, before requiring switch OFF for release.
++            type: int32
++            min: 100
++            max: 2000
++            default: 300
++            unit: "ms"
++        TRTL_DB:
++            description:
++                short: "Recovery roll/pitch deadband"
++                long: |
++                    Percent of normalized roll or pitch. Diagonal deflection selects a single corner; axis-only input selects a pair.
++            type: int32
++            min: 5
++            max: 60
++            default: 20
++            unit: "%"
++        TRTL_PWR:
++            description:
++                short: "Use proportional stick power"
++                long: |
++                    1 maps stick magnitude above deadband to MIN..MAX with the ramp cap. 0 retains a timed ramp to MAX regardless of stick magnitude.
++            type: int32
++            min: 0
++            max: 1
++            default: 1
++        TRTL_HOLD:
++            description:
++                short: "Deliberate activation hold"
++                long: |
++                    Continuous eligibility after a fresh OFF-to-ON request while disarmed. Switch OFF for at least 300 ms is required between attempts and after RC loss.
++            type: int32
++            min: 100
++            max: 1000
++            default: 400
++            unit: "ms"
++        TRTL_FL:
++            description:
++                short: "Front-left logical motor"
++                long: |
++                    PX4 logical Motor 1..4 at the front-left corner, looking down with the quad upright and nose forward. Not a connector number. All four must be distinct; 0 is unconfigured. Allocation positions and axes must agree.
++            type: int32
++            min: 0
++            max: 4
++            default: 0
++        TRTL_FR:
++            description:
++                short: "Front-right logical motor"
++                long: |
++                    PX4 logical Motor 1..4 at the front-right corner, looking down with the quad upright and nose forward. Not a connector number. All four must be distinct; 0 is unconfigured. Allocation positions and axes must agree.
++            type: int32
++            min: 0
++            max: 4
++            default: 0
++        TRTL_RL:
++            description:
++                short: "Rear-left logical motor"
++                long: |
++                    PX4 logical Motor 1..4 at the rear-left corner, looking down with the quad upright and nose forward. Not a connector number. All four must be distinct; 0 is unconfigured. Allocation positions and axes must agree.
++            type: int32
++            min: 0
++            max: 4
++            default: 0
++        TRTL_RR:
++            description:
++                short: "Rear-right logical motor"
++                long: |
++                    PX4 logical Motor 1..4 at the rear-right corner, looking down with the quad upright and nose forward. Not a connector number. All four must be distinct; 0 is unconfigured. Allocation positions and axes must agree.
++            type: int32
++            min: 0
++            max: 4
++            default: 0
+diff --git a/src/lib/dragonfly_turtle/ArmingInterlock.hpp b/src/lib/dragonfly_turtle/ArmingInterlock.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..775b56547a54b30bee72aa2e45502e22ac3ba251
+--- /dev/null
++++ b/src/lib/dragonfly_turtle/ArmingInterlock.hpp
+@@ -0,0 +1,59 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Shared within the monolithic PX4 firmware. Not an ESC acknowledgement.
++#pragma once
++#include <stdint.h>
++// GCC/Clang atomic builtins preserve the original sequentially-consistent
++// operations without depending on the C++ <atomic> header. Do not replace
++// these accesses with volatile or ordinary loads/stores.
++static_assert(__atomic_always_lock_free(sizeof(uint32_t), nullptr),
++              "Dragonfly requires lock-free 32-bit atomics");
++static_assert(__atomic_always_lock_free(sizeof(bool), nullptr),
++              "Dragonfly requires lock-free boolean atomics");
++namespace dragonfly_trtl {
++enum class Owner : uint32_t { NONE, FLIGHT, RECOVERY, FAULT };
++class Interlock {
++public:
++    Interlock() = default;
++    Interlock(const Interlock &) = delete;
++    Interlock &operator=(const Interlock &) = delete;
++    bool acquire_recovery() { uint32_t x=uint32_t(Owner::NONE); return __atomic_compare_exchange_n(&_owner, &x, uint32_t(Owner::RECOVERY), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
++    bool acquire_flight(bool require_ready) {
++        if (require_ready && !__atomic_load_n(&_ready, __ATOMIC_SEQ_CST)) { return false; }
++        uint32_t x=uint32_t(Owner::NONE);
++        if (!__atomic_compare_exchange_n(&_owner, &x, uint32_t(Owner::FLIGHT), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) { return false; }
++        if (require_ready && !__atomic_load_n(&_ready, __ATOMIC_SEQ_CST)) { release_flight(); return false; }
++        return true;
++    }
++    void release_flight() { uint32_t x=uint32_t(Owner::FLIGHT); __atomic_compare_exchange_n(&_owner, &x, uint32_t(Owner::NONE), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
++    void release_recovery() { uint32_t x=uint32_t(Owner::RECOVERY); __atomic_compare_exchange_n(&_owner, &x, uint32_t(Owner::NONE), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
++    void set_ready(bool ready) { __atomic_store_n(&_ready, ready, __ATOMIC_SEQ_CST); }
++    bool ready() const { return __atomic_load_n(&_ready, __ATOMIC_SEQ_CST); }
++    Owner owner() const { return Owner(__atomic_load_n(&_owner, __ATOMIC_SEQ_CST)); }
++    bool recovery_owned() const { return owner()==Owner::RECOVERY || owner()==Owner::FAULT; }
++    void latch_fault() { __atomic_store_n(&_ready, false, __ATOMIC_SEQ_CST); __atomic_store_n(&_owner, uint32_t(Owner::FAULT), __ATOMIC_SEQ_CST); }
++private:
++    alignas(4) uint32_t _owner{uint32_t(Owner::NONE)};
++    bool _ready{false};
++};
++// C++ inline function-local static has one instance across translation units.
++// Verified by a separate-translation-unit test in this package.
++inline Interlock &interlock() { static Interlock value; return value; }
++class ArmGuard {
++public:
++    ArmGuard(const uint8_t &state, uint8_t armed_value, bool require_ready)
++        : _state(state), _armed(armed_value), _already(state==armed_value),
++          _reserved(!_already && interlock().acquire_flight(require_ready)) {}
++    ~ArmGuard() { if (_reserved && _state!=_armed) { interlock().release_flight(); } }
++    bool allowed() const { return _already || _reserved; }
++    ArmGuard(const ArmGuard&)=delete; ArmGuard &operator=(const ArmGuard&)=delete;
++private:
++    const uint8_t &_state; uint8_t _armed; bool _already; bool _reserved;
++};
++class DisarmGuard {
++public:
++    DisarmGuard(const uint8_t &state,uint8_t armed_value):_state(state),_armed(armed_value) {}
++    ~DisarmGuard() { if (_state!=_armed) { interlock().release_flight(); } }
++private:
++    const uint8_t &_state; uint8_t _armed;
++};
++} // namespace dragonfly_trtl
+diff --git a/src/lib/mixer_module/mixer_module.hpp b/src/lib/mixer_module/mixer_module.hpp
+index c55b72da4e92e600a8dd0761ea08c521e9d64a3d..42283dc8614eda3aa2faf183ce712b3ab3a94e7c 100644
+--- a/src/lib/mixer_module/mixer_module.hpp
++++ b/src/lib/mixer_module/mixer_module.hpp
+@@ -165,6 +165,7 @@ public:
+ 	void setMaxTopicUpdateRate(unsigned max_topic_update_interval_us);
+ 
+ 	const actuator_armed_s &armed() const { return _armed; }
++	bool isActuatorTestRunning() const { return _actuator_test.inTestMode(); }
+ 
+ 	void setAllFailsafeValues(uint16_t value);
+ 	void setAllDisarmedValues(uint16_t value);
+diff --git a/src/modules/commander/Commander.cpp b/src/modules/commander/Commander.cpp
+index cebc08ae94165b3eea4c1aebb1f0d82dc8303f1c..172064ddd4bececd7ec166f3119d1bd2e537abe4 100644
+--- a/src/modules/commander/Commander.cpp
++++ b/src/modules/commander/Commander.cpp
+@@ -39,6 +39,8 @@
+  */
+ 
+ #include "Commander.hpp"
++#include <lib/dragonfly_turtle/ArmingInterlock.hpp>
++#include <parameters/param.h>
+ 
+ /* commander module headers */
+ #include "Arming/ArmAuthorization/ArmAuthorization.h"
+@@ -537,6 +539,19 @@ static constexpr const char *arm_disarm_reason_str(arm_disarm_reason_t calling_r
+ 
+ transition_result_t Commander::arm(arm_disarm_reason_t calling_reason, bool run_preflight_checks)
+ {
++    // DRAGONFLY 2B8: mutual exclusion with DShot reversal/restoration.
++    int32_t turtle_enabled=0;
++    const param_t turtle_enable_handle=param_find("TRTL_EN");
++    if (turtle_enable_handle!=PARAM_INVALID) {param_get(turtle_enable_handle,&turtle_enabled);}
++    dragonfly_trtl::ArmGuard turtle_arm_guard(_vehicle_status.arming_state,
++        vehicle_status_s::ARMING_STATE_ARMED,turtle_enabled!=0);
++    if (!turtle_arm_guard.allowed()) {
++        mavlink_log_critical(&_mavlink_log_pub,"Arming denied: turtle active or not ready");
++        events::send(events::ID("commander_arm_denied_turtle"),events::Log::Critical,
++            "Arming denied: turtle active or not ready");
++        return TRANSITION_DENIED;
++    }
++
+ 	if (isArmed()) {
+ 		return TRANSITION_NOT_CHANGED;
+ 	}
+@@ -624,6 +639,9 @@ transition_result_t Commander::arm(arm_disarm_reason_t calling_reason, bool run_
+ 
+ transition_result_t Commander::disarm(arm_disarm_reason_t calling_reason, bool forced)
+ {
++    dragonfly_trtl::DisarmGuard turtle_disarm_guard(_vehicle_status.arming_state,
++        vehicle_status_s::ARMING_STATE_ARMED);
++
+ 	if (!isArmed()) {
+ 		return TRANSITION_NOT_CHANGED;
+ 	}

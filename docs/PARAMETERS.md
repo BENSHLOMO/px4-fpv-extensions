@@ -1,6 +1,6 @@
 # TRTL parameter reference
 
-Generated directly from the uploaded patch's `module.yaml` additions. These are code defaults, not the user's parameter export. All 21 values are int32.
+Reference for the patch's `module.yaml` parameter definitions. The table lists source defaults; aircraft-specific tuning is configured separately. All 21 values are int32.
 
 | Name | Default | Bounds | Unit | Purpose |
 |---|---:|---|---|---|

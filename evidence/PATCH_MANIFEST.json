@@ -2,9 +2,9 @@
   "schema": 1,
   "review_date": "2026-11-08",
   "patch": "patches/dragonfly-b8-trtl.patch",
-  "patch_sha256": "2f4933719c71876fea964ea87c48cdb550f9c8f21d87fae6f8171fe2d1cbe913",
-  "size_bytes": 73391,
-  "line_count": 1516,
+  "patch_sha256": "9d8f3086b242762c951e8aace4c5b99cece3b5920256bfa344dbd139ec1725a8",
+  "size_bytes": 73563,
+  "line_count": 1520,
   "base_commit_reported": "94cb2012792b2ae89f0b147cfee53ee31ae550be",
   "frozen_tag_reported": "dragonfly-b8-trtl-tested-20261107T225810Z",
   "frozen_commit_reported": "ccfc0f53587c139b8d7afdecf374732665037612",
@@ -13,14 +13,14 @@
       "path": "src/drivers/dshot/ArmingInterlock.hpp",
       "new_file": true,
       "base_blob": "0000000000000000000000000000000000000000",
-      "target_blob": "5e8258d704d6e26aef19a9de2fcc19665096bcb5",
-      "additions": 2
+      "target_blob": "05681c56e6c4fa36b094e9477c528c9be8ab65f0",
+      "additions": 3
     },
     {
       "path": "src/drivers/dshot/DShot.cpp",
       "new_file": false,
       "base_blob": "10c356ade1b60a3208782e74725412420036f072",
-      "target_blob": "815978e852cda0992fabc0bda64909ec9009c6ed",
+      "target_blob": "ce0c952ef942f668bb27779e670543c1097338d2",
       "additions": 246
     },
     {
@@ -34,8 +34,8 @@
       "path": "src/drivers/dshot/DragonflyTurtleAngle.hpp",
       "new_file": true,
       "base_blob": "0000000000000000000000000000000000000000",
-      "target_blob": "c2aca11974cff582c56496089def1df408817a11",
-      "additions": 20
+      "target_blob": "0af31ba302935979cf552bdf35a8d5414cc0fdcd",
+      "additions": 21
     },
     {
       "path": "src/drivers/dshot/DragonflyTurtleCore.hpp",
@@ -62,15 +62,15 @@
       "path": "src/drivers/dshot/DragonflyTurtleMotor.hpp",
       "new_file": true,
       "base_blob": "0000000000000000000000000000000000000000",
-      "target_blob": "5e4a4272f0230e19daeaec12e07a7eeab32dcaef",
-      "additions": 229
+      "target_blob": "907c7a9c9327ae23d5d70dadb1662df5ac8a62c1",
+      "additions": 230
     },
     {
       "path": "src/drivers/dshot/DragonflyTurtleRc.hpp",
       "new_file": true,
       "base_blob": "0000000000000000000000000000000000000000",
-      "target_blob": "4923ca0011a8e93630dafe2c5a1fee75cf531950",
-      "additions": 42
+      "target_blob": "f67355cade28a003bb9805b2d9fb3c71eabf3fba",
+      "additions": 43
     },
     {
       "path": "src/drivers/dshot/DragonflyTurtleTimer.hpp",
@@ -108,5 +108,7 @@
       "additions": 18
     }
   ],
-  "artifact_note": "Patch preserved byte-for-byte. Base commit and snapshot identifiers were supplied in conversation; no full upstream checkout was available for independent apply/build validation in this review."
+  "artifact_note": "Comment/license-notice-only revision from frozen tested baseline; exact target blobs validated by temporary pinned-base apply. The cleaned patch has not been hardware-tested as a separate image.",
+  "cleanup_parent_sha256": "2f4933719c71876fea964ea87c48cdb550f9c8f21d87fae6f8171fe2d1cbe913",
+  "cleanup_scope": "comments_and_spdx_only"
 }

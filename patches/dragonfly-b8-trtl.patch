@@ -1,13 +1,14 @@
 diff --git a/src/drivers/dshot/ArmingInterlock.hpp b/src/drivers/dshot/ArmingInterlock.hpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..5e8258d704d6e26aef19a9de2fcc19665096bcb5
+index 0000000000000000000000000000000000000000..05681c56e6c4fa36b094e9477c528c9be8ab65f0
 --- /dev/null
 +++ b/src/drivers/dshot/ArmingInterlock.hpp
-@@ -0,0 +1,2 @@
+@@ -0,0 +1,3 @@
++// SPDX-License-Identifier: BSD-3-Clause
 +#pragma once
 +#include <lib/dragonfly_turtle/ArmingInterlock.hpp>
 diff --git a/src/drivers/dshot/DShot.cpp b/src/drivers/dshot/DShot.cpp
-index 10c356ade1b60a3208782e74725412420036f072..815978e852cda0992fabc0bda64909ec9009c6ed 100644
+index 10c356ade1b60a3208782e74725412420036f072..ce0c952ef942f668bb27779e670543c1097338d2 100644
 --- a/src/drivers/dshot/DShot.cpp
 +++ b/src/drivers/dshot/DShot.cpp
 @@ -32,6 +32,9 @@
@@ -71,9 +72,9 @@ index 10c356ade1b60a3208782e74725412420036f072..815978e852cda0992fabc0bda64909ec
  	return true;
  }
  
-+// Stage 2B1 independent recovery gate. Motor output is compile-disabled.
-+// This duplicates the already-validated Stage 2A preconditions inside the
-+// DShot driver, instead of trusting commands from another PX4 module.
++// Legacy Stage 2B1 recovery diagnostics retained for historical context.
++// The active Stage 2B8 controller is motor-capable and owns recovery output;
++// these older diagnostics are not the authority for the current logic.
 +// Stage 2B5: read PX4 parameter values while IDLE, not during a motor burst.
 +// Polling at 4 Hz avoids expensive parameter accesses in the 8+ kHz output loop.
 +// 2B6: select a physical RC input channel, not a hard-coded AUX slot.
@@ -433,10 +434,11 @@ index 9b4d8cfb484ec054106e39c54340362bec7fead7..96ec480fbf6ae720e8ac0d1c15ba3ff6
  	uORB::PublicationMultiData<esc_status_s> esc_status_pub{ORB_ID(esc_status)};
 diff --git a/src/drivers/dshot/DragonflyTurtleAngle.hpp b/src/drivers/dshot/DragonflyTurtleAngle.hpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..c2aca11974cff582c56496089def1df408817a11
+index 0000000000000000000000000000000000000000..0af31ba302935979cf552bdf35a8d5414cc0fdcd
 --- /dev/null
 +++ b/src/drivers/dshot/DragonflyTurtleAngle.hpp
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: BSD-3-Clause
 +// Angle relative to upright for PX4 turtle recovery.
 +#pragma once
 +#include <cmath>
@@ -834,10 +836,11 @@ index 0000000000000000000000000000000000000000..9b3926ea45dd5d270d0228a7339b2baf
 +} // namespace dragonfly_mapping
 diff --git a/src/drivers/dshot/DragonflyTurtleMotor.hpp b/src/drivers/dshot/DragonflyTurtleMotor.hpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..5e4a4272f0230e19daeaec12e07a7eeab32dcaef
+index 0000000000000000000000000000000000000000..907c7a9c9327ae23d5d70dadb1662df5ac8a62c1
 --- /dev/null
 +++ b/src/drivers/dshot/DragonflyTurtleMotor.hpp
-@@ -0,0 +1,229 @@
+@@ -0,0 +1,230 @@
++// SPDX-License-Identifier: BSD-3-Clause
 +// Dragonfly 2B7: repeatable AM32 recovery with latched PX4 parameter limits.
 +// Bench candidate: no ESC acknowledgement is available for direction restoration.
 +#pragma once
@@ -1069,10 +1072,11 @@ index 0000000000000000000000000000000000000000..5e4a4272f0230e19daeaec12e07a7eea
 +} // namespace dragonfly_motor
 diff --git a/src/drivers/dshot/DragonflyTurtleRc.hpp b/src/drivers/dshot/DragonflyTurtleRc.hpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..4923ca0011a8e93630dafe2c5a1fee75cf531950
+index 0000000000000000000000000000000000000000..f67355cade28a003bb9805b2d9fb3c71eabf3fba
 --- /dev/null
 +++ b/src/drivers/dshot/DragonflyTurtleRc.hpp
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,43 @@
++// SPDX-License-Identifier: BSD-3-Clause
 +// PX4 FPV Extensions: RC channel selection for Dragonfly recovery.
 +// Experimental extension; do not use without hardware-specific review.
 +#pragma once

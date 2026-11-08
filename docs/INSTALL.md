@@ -8,7 +8,7 @@ The patch is currently prepared for PX4-Autopilot commit:
 94cb2012792b2ae89f0b147cfee53ee31ae550be
 ```
 
-It is **not** a universal binary and should not be applied blindly to PX4 `main`, another release, or another board target.
+This is a source patch for the pinned revision. Other PX4 revisions require a separate port and build validation.
 
 ## 1. Obtain a clean PX4 checkout
 
@@ -36,7 +36,7 @@ Then, from the PX4 checkout:
 git apply --check /path/to/px4-fpv-extensions/patches/dragonfly-b8-trtl.patch
 ```
 
-A successful apply check is not a successful firmware build.
+This step verifies patch applicability; step 4 builds the target firmware.
 
 ## 3. Apply the patch
 
@@ -59,9 +59,7 @@ Use the PX4 board target appropriate to the flight controller. The Dragonfly dev
 make micoair_h743-v2_default
 ```
 
-That target is **not** appropriate for another flight controller.
-
-The reusable patch intentionally does not include Dragonfly's board-specific OSD configuration or private aircraft parameters.
+Select the matching board target for each additional controller. Board-specific OSD configuration and aircraft parameters are configured separately from the core patch.
 
 ## 5. Configure before enabling
 
@@ -80,6 +78,6 @@ At minimum, validate:
 
 Do initial motor/direction testing with propellers removed.
 
-## 6. Do not copy Dragonfly's hardware values blindly
+## 6. Tune for the propulsion system
 
-Dragonfly's documented test mapping and 850/1500 command values are evidence from one aircraft, not generic defaults for every motor, propeller, battery, guard geometry, or ESC firmware.
+Dragonfly's documented mapping and 850/1500 command values describe the tested aircraft. Select and validate values for the actual motor, propeller, battery, guard geometry and ESC firmware on each build.

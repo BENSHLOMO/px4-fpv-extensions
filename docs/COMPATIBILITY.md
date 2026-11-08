@@ -1,30 +1,37 @@
-# Compatibility and evidence
+# Compatibility and validation scope
 
-## Hardware evidence supplied in this conversation
+## Tested development configuration
 
-| Item | Evidence |
+| Item | Recorded configuration or result |
 |---|---|
-| Aircraft | Personal guarded 2.5-inch Dragonfly quad |
+| Aircraft | Guarded 2.5-inch Dragonfly quad |
 | Controller/build target | MicoAir H743 V2 / `micoair_h743-v2_default` |
-| Flight stack | Custom PX4 v1.16.1, pinned source base in manifest |
-| ESC | AM32; exact firmware version and target not supplied |
-| RC | TX16S/physical RC path, recovery channel 9 |
-| Short-name target build | User log: 1,674,240 bytes; 160,768 bytes remaining in this board's reported flash region |
-| Real recovery | Operator explicitly reported the short-name version worked in real use |
-| Driver telemetry | One supplied attempt stopped for UPRIGHT after 440 ms of DRIVE; restore sequences were sent |
+| Flight stack | Custom PX4 v1.16.1, pinned source base in the manifest |
+| ESC | AM32; exact firmware version and target not recorded |
+| RC | RadioMaster TX16S, physical RC path, recovery channel 9 |
+| TRTL build size | 1,674,240 bytes; 160,768 bytes remaining in the board's reported flash region |
+| Recovery | Successful real-world recovery reported by the aircraft operator |
+| Driver status | One recorded attempt stopped for UPRIGHT after 440 ms of DRIVE; restore sequences were sent |
 
-These are reported/observed conversation results, not independent flights by the reviewer. A generic successful-use statement is not converted into a pass for every distinct fault scenario.
+Build logs, driver output and operator reports are the basis of these results. Individual fault scenarios require their own recorded hardware tests.
 
-## Intended software scope
+## Supported software configuration
 
-Four PX4 logical motors (1..4), distinct X-like corners, fixed near-vertical thrust axes, supported non-VTOL rotary-wing geometry, one DShot driver instance controlling all recovery motors, and verified temporary relative-direction command semantics 21/20. Configuration is opt-in.
+The controller requires four distinct PX4 logical motors (1..4) in X-like corners, fixed near-vertical thrust axes, non-VTOL rotary-wing geometry, and one DShot driver instance controlling all recovery motors. The ESC firmware must support verified temporary relative-direction command semantics 21/20. Configuration is opt-in.
 
-The geometry checker requires corner positions in the appropriate body-frame quadrants. It is not a geometry-weighted torque controller and does not promise equal performance for every deadcat or stretched frame.
+The geometry checker validates corner positions in the corresponding body-frame quadrants. Motor selection uses corner pairs or a single corner; it does not weight torque by frame dimensions. Deadcat and stretched frames need propulsion and recovery tuning for their geometry.
 
-Unsupported here: PWM, OneShot, CAN/mixed output backends, plus/coaxial/tilting/VTOL/hexa/octa configurations, 3D/reversible-throttle setups and multiple selectable RC inputs. Another board also needs its own build target and sufficient memory.
+## Configurations outside the current scope
 
-## Boundaries still needing evidence
+- PWM, OneShot, CAN or mixed motor-output backends;
+- plus, coaxial, tilting, VTOL, hexa or octa configurations;
+- 3D/reversible-throttle setups;
+- multiple selectable RC inputs.
 
-Exact ESC version/target; independent normal-direction verification; cancellation/link-loss/reacquisition cases on this exact revision; FC-only reset with ESCs still powered; ESC brownout/reset during an attempt; other FC/ESC combinations. Do not deliberately inject hazardous faults in flight to fill a table.
+Each additional flight controller requires its own board target, sufficient memory and build validation. Each ESC/aircraft combination requires hardware validation.
 
-The existing working aircraft needs no repeat flight solely to create the private repository. Future compatibility claims should grow only with recorded evidence.
+## Additional validation work
+
+Record the exact ESC firmware version and target, normal-direction verification, cancellation/link-loss/reacquisition results, FC-only reset behavior while ESCs remain powered, and ESC brownout/reset behavior during a recovery transaction. Perform fault testing in a controlled bench setup.
+
+See [Hardware validation matrix](HARDWARE_MATRIX.md) for the current evidence and the fields needed to document another platform.

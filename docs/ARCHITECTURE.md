@@ -1,8 +1,8 @@
-# Architecture of the uploaded B8 patch
+# Turtle recovery architecture
 
 ## Active path
 
-`DShot::Run()` polls configuration and input topics, invokes the normal mixer update, and provides a recovery-only fallback output callback when needed. While active, the existing DShot driver remains the physical output owner; a separate module is not used to compete with it.
+`DShot::Run()` polls configuration and input topics, invokes the normal mixer update, and provides a recovery-only fallback output callback when needed. The existing DShot driver owns physical motor output throughout recovery.
 
 `update_turtle_parameters()` caches configuration, resolves logical motor corner assignments to active output bits, checks allocator geometry and radio conflicts, and accepts changes only in the permitted idle/disarmed/OFF conditions. Parameter values shown in QGroundControl can therefore differ temporarily from the active driver snapshot. Center switch position does not qualify as OFF.
 
@@ -18,14 +18,14 @@ IDLE -> HOLD -> PRESTOP -> REVERSE -> SETTLE -> DRIVE
 
 Startup uses POSTSTOP/RESTORE/COOLDOWN/WAIT_OFF before readiness. Certain unrecoverable conditions latch FAULT. RESTORE represents transmitted temporary normal-direction commands, not acknowledgements.
 
-`src/lib/dragonfly_turtle/ArmingInterlock.hpp` is shared by Commander and DShot in the monolithic build. Atomic ownership separates FLIGHT and RECOVERY. Commander denies new arm requests when recovery owns the outputs or required readiness is absent. This is software coordination, not an independent hardware watchdog.
+`src/lib/dragonfly_turtle/ArmingInterlock.hpp` is shared by Commander and DShot in the monolithic build. Atomic ownership separates FLIGHT and RECOVERY. Commander denies new arm requests when recovery owns the outputs or required readiness is absent. This interlock coordinates software ownership; an independent hardware watchdog is outside its scope.
 
 `DragonflyTurtleMapping.hpp` maps distinct logical motors 1..4 to local DShot output bits. Cardinal roll/pitch selects a side or end pair. Combined deflection selects the intersecting corner. Motor order is configurable, not hard-coded to the first four connectors.
 
-## Development leftovers
+## Legacy helpers
 
-The exported snapshot also retains the earlier Motor/Timer/Angle helpers and unused driver members. They are not the active B8 state machine. Do not read their older thresholds as B8 policy or assume the legacy compile-enable macro governs the active controller. See the release review before cleanup.
+The patch retains earlier Motor/Timer/Angle helpers and unused driver members. The active B8 state machine is `DragonflyTurtleCore.hpp`; its thresholds and enable logic govern recovery. Legacy-helper removal is tracked in [Release review](RELEASE_REVIEW.md) as a separate refactor.
 
 ## Configuration and telemetry limitations
 
-Only one physical RC path is handled. Live settings are latched between attempts, not promised to apply immediately during a burst. Output assignment changes are not a supported recovery control. The interlock/status labels do not assert ground contact or successful ESC direction command acceptance.
+One physical RC path is supported. Settings are latched between attempts under the permitted idle/disarmed/OFF conditions. Output assignments remain fixed during recovery. Ground contact and physical ESC direction acknowledgement are outside the reported interlock/status information.

@@ -1,25 +1,42 @@
 # Validation record
 
-## Independently executed in this review
+## Host tests
 
 See `evidence/HOST_TEST_RESULTS.txt` and `evidence/REVIEW_TOOL_TESTS.txt`.
 
-The C++ tests are retained from the supplied prior B8 test package. The runner was added for this review so they compile against new-file contents extracted and hash-checked from **the uploaded patch**, rather than a reconstructed replacement controller.
+The test runner extracts the new-file headers from the exported patch and verifies their Git blob hashes before compiling the B8 host suites.
 
-Host suite results: RC zero-secondary-timestamp regression; 25 controller scenarios across six callback intervals; 44 phase/fault cases; 1,000 recovery/release cycles; 285,120 corner/slot mapping combinations; interlock guard lifetimes and 200,000 concurrent reservation attempts. The hardware-independent headers were compiled using g++ C++14 with warnings-as-errors and UBSan.
+Recorded results:
 
-These callback intervals are simulated calls, not measured target scheduling rates. The interlock test uses host threads, not the target RTOS. The runner does not compile the complete modified DShot.cpp, Commander.cpp or mixer, and does not reproduce the full PX4 build.
+- RC zero-secondary-timestamp regression checks;
+- 25 controller scenarios across six callback intervals;
+- 44 phase and fault cases;
+- 1,000 recovery/release cycles;
+- 285,120 motor-corner/output-slot combinations;
+- interlock guard lifetimes and 200,000 concurrent reservation attempts.
 
-Two additional Python packaging tests exercised temporary patch application/target hashes, preservation of the original test repository index/HEAD/worktree, patch checksum rejection and unsafe-path rejection.
+The hardware-independent headers were compiled with g++ C++14, warnings-as-errors and UBSan. Callback intervals are simulated calls, and concurrency checks use host threads. These suites test the extracted headers; they do not compile the complete DShot, Commander or mixer implementation or measure target RTOS scheduling.
 
-## Existing hardware/build evidence
+Two Python tests exercise temporary patch application, target hashes, preservation of the test repository's index/HEAD/worktree, checksum rejection and unsafe-path rejection.
 
-The user supplied successful ARM build logs and explicitly reported real-world recovery working on Dragonfly. Those results are retained as operator evidence and are not re-described as reviewer-performed tests.
+## Target build and hardware results
 
-## Pending release reproducibility
+The development record includes successful ARM build logs and operator-reported real-world recovery on Dragonfly. These results apply to the preserved hardware-tested checkpoint and its aircraft configuration.
 
-Run the supplied read-only pinned-base verifier using the existing local PX4 repository. A separate clean-checkout board build, with a documented board configuration, remains a release-reproducibility step. The full-aircraft board/OSD profile is not in this core patch.
+The later comment/SPDX cleanup passed the host suites and temporary pinned-base application with target-blob verification. It has not been built and hardware-tested as a separate firmware. See [Source hygiene](SOURCE_HYGIENE.md).
 
-## Evidence capture template
+## Reproducible target builds
 
-Record exact source/firmware hashes, board target, ESC firmware version, battery/propeller configuration, case tested, result, and a brief log or video reference when available. Keep private locations and aircraft calibration files out of the public repository.
+A separate clean-checkout board build with a documented board configuration remains to be recorded. The core patch excludes the full Dragonfly board/OSD profile.
+
+The read-only pinned-base check is available for a local PX4 repository:
+
+```bash
+python3 tools/verify_pinned_base.py /path/to/PX4-Autopilot
+```
+
+This verifies patch application and source blobs. Firmware installation on the flight controller is verified separately.
+
+## Recording another result
+
+Record source and firmware hashes, board target, ESC firmware version, battery/propeller configuration, the case tested, result, and a log or video reference. Use the [Hardware validation matrix](HARDWARE_MATRIX.md) checklist for a new platform.

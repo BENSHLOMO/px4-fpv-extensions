@@ -1,110 +1,88 @@
-# PX4 FPV Extensions
+# PX4 Turtle Recovery
 
 **Developed by [Yisrael Ben-Shlomo](https://github.com/yisrael-benshlomo) at [BENSHLOMO | Advanced Systems](https://github.com/BENSHLOMO)**
 
-Experimental PX4 extensions and integration notes.
+Configurable turtle mode (crash-flip recovery) for Quad-X aircraft running PX4.
 
-This repository currently contains a configurable **Quad-X turtle / crash-flip recovery extension** for a pinned PX4 v1.16.1 source revision. It was developed and hardware-tested on the personal **Dragonfly** 2.5-inch guarded quad, then generalized in software for supported conventional four-motor X-like layouts.
+Turtle mode lets a pilot recover a quadcopter that has tipped over by temporarily reversing selected motors and using the roll/pitch stick to turn it upright. It is particularly useful for indoor flying and operation near obstacles, where a collision can leave an aircraft overturned and difficult to reach.
 
-> **Status:** experimental source-level extension. It is not an upstream PX4 feature, not production-ready, and not claimed to work on every DShot ESC or airframe.
+We developed this extension for Dragonfly, a 2.5-inch guarded quad, and released the source for other PX4 builders. Motor mapping, radio input, power, timing and recovery angles are configurable through 21 native `TRTL_*` parameters in QGroundControl.
 
-## What has actually been demonstrated
+**Release:** experimental source patch for PX4 v1.16.1. Hardware validation currently covers the Dragonfly configuration below. Additional builds require configuration and validation for their airframe and ESC firmware.
 
-On the Dragonfly test aircraft, the current TRTL build:
+## Recovery controls
 
-- compiled successfully for **MicoAir H743 V2**;
-- loaded configurable `TRTL_*` parameters in QGroundControl;
-- resolved the tested logical-to-physical motor mapping correctly;
-- performed real-world turtle recovery successfully;
-- stopped recovery on reaching the configured upright threshold;
-- restored the recovery sequence and returned to the operator-controlled reset state.
+- Configurable logical FL/FR/RL/RR motor mapping and recovery switch channel/polarity.
+- Roll/pitch stick selection with proportional power, minimum/maximum output and ramp time.
+- Separate entry and near-upright exit angles.
+- Stop → temporary reverse → drive → stop → restore sequencing.
+- Switch-OFF qualification between attempts and startup direction normalization.
+- Commander/DShot ownership interlock, recovery timeout, cancellation conditions and configuration checks.
 
-The test aircraft uses **AM32 ESC firmware** with temporary direction commands that were verified during development. The exact AM32 firmware version still needs to be recorded before this is advertised as a reusable hardware profile.
+Recovery commands selected motors while PX4 is disarmed. The feature defaults disabled and requires explicit configuration before use.
 
-Host-side tests also cover recovery state transitions, RC validation, motor mapping permutations, fault/cancellation cases, repeated attempts, and the Commander/DShot ownership interlock. See [`docs/VALIDATION.md`](docs/VALIDATION.md).
+## Tested hardware and results
 
-## Repository contents
+| Component | Tested configuration |
+| --- | --- |
+| Aircraft | Dragonfly, 2.5-inch guarded Quad-X |
+| Flight controller | MicoAir H743 V2 |
+| Flight stack | Custom PX4 v1.16.1 |
+| ESC firmware family | AM32; exact version pending documentation |
 
-- [`patches/dragonfly-b8-trtl.patch`](patches/dragonfly-b8-trtl.patch) — exact exported patch from the tested development checkpoint.
-- [`docs/INSTALL.md`](docs/INSTALL.md) — applying the patch to the pinned PX4 source revision.
-- [`docs/PARAMETERS.md`](docs/PARAMETERS.md) — all 21 `TRTL_*` parameters.
-- [`docs/OPERATION.md`](docs/OPERATION.md) — controller behavior and operator workflow.
-- [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — supported scope and exclusions.
-- [`docs/HARDWARE_MATRIX.md`](docs/HARDWARE_MATRIX.md) — hardware evidence and what has not yet been tested.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — DShot recovery architecture.
-- [`tests/`](tests/) — host-side tests against the exported source headers.
-- [`tools/verify_pinned_base.py`](tools/verify_pinned_base.py) — read-only patch/base verification tool.
-- [`evidence/`](evidence/) — host-test and patch-review evidence.
+The TRTL build compiled for the MicoAir H743 V2, loaded its parameters in QGroundControl and completed real-world recovery on Dragonfly. Testing included motor mapping, the configured upright exit threshold, direction-restoration sequencing and return to the switch-OFF reset state.
 
-The repository intentionally does **not** include the aircraft's private parameter dump, prebuilt firmware, SSH credentials, client material, or the full Dragonfly aircraft configuration.
+Host tests cover controller transitions, RC validation, motor-mapping permutations, fault/cancellation cases, repeated attempts and the Commander/DShot interlock. See [validation results](docs/VALIDATION.md) and the [hardware matrix](docs/HARDWARE_MATRIX.md) for the recorded scope.
 
-## Pinned PX4 base
+## Compatibility and setup
 
-The exported patch targets:
+The patch targets this PX4-Autopilot revision:
 
 ```text
-PX4-Autopilot commit 94cb2012792b2ae89f0b147cfee53ee31ae550be
+94cb2012792b2ae89f0b147cfee53ee31ae550be
 ```
 
-Do not assume the patch applies to PX4 `main` or another release. Port and test separately.
+Other PX4 revisions require a separate port and validation. The supported software scope is conventional four-motor X-like geometry using compatible DShot ESC firmware.
 
-## Core behavior
+ESC firmware must support **temporary relative DShot direction commands 21/20**. The `restores_sent` and `synced=1` diagnostics report completion of the software sequence; physical direction is not acknowledged by the ESCs. Verify mapping, direction, cancellation, restoration and arming on a secured propeller-free bench before recovery tests with propellers.
 
-The extension adds:
+Start with the [installation guide](docs/INSTALL.md), [compatibility requirements](docs/COMPATIBILITY.md) and [operating procedure](docs/OPERATION.md). This release provides a source patch to build for your target board.
 
-- configurable logical FL/FR/RL/RR motor mapping;
-- configurable RC channel and polarity;
-- separate recovery-entry and near-upright exit angles;
-- proportional stick power with configurable minimum, maximum and ramp;
-- bounded stop → temporary reverse → drive → stop → restore sequencing;
-- explicit switch-OFF qualification between attempts;
-- startup normal-direction normalization;
-- Commander/DShot ownership interlock to avoid normal arming while recovery owns motor output;
-- configuration, geometry and RC-conflict validation.
+## Source, documentation and tests
 
-The feature intentionally permits selected DShot motor output while PX4 is disarmed. It therefore defaults disabled/unconfigured and requires explicit setup.
+| Resource | Contents |
+| --- | --- |
+| [Source patch](patches/dragonfly-b8-trtl.patch) | Tested checkpoint with the documented comment/SPDX cleanup |
+| [Parameters](docs/PARAMETERS.md) | All 21 `TRTL_*` settings |
+| [Architecture](docs/ARCHITECTURE.md) | DShot recovery controller and arming coordination |
+| [Release status](docs/PUBLICATION_STATUS.md) | Validation scope and next development steps |
+| [Source history](docs/SOURCE_HYGIENE.md) | Publication changes relative to the tested checkpoint |
+| [Host tests](tests/) | Tests against the exported source headers |
+| [Evidence](evidence/) | Recorded host-test and patch-review results |
 
-## Important hardware limitation
-
-The implementation relies on **temporary relative DShot direction commands 21/20**. A DShot-capable ESC is not automatically compatible. `restores_sent` and `synced=1` mean the software transmitted/completed its sequence; they are **not ESC acknowledgements of physical direction**.
-
-Initial mapping, direction, cancellation, restoration and arming checks belong on a secured propeller-free bench before attempting recovery with propellers installed.
-
-## Quick start
-
-Read [`docs/INSTALL.md`](docs/INSTALL.md), [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md), and [`docs/OPERATION.md`](docs/OPERATION.md) before applying the patch.
-
-For host tests in this repository:
+Run the host tests:
 
 ```bash
 python3 tests/run_host_tests.py
 python3 tests/test_review_tools.py
 ```
 
-To verify that the patch matches the pinned base already present in a local PX4 repository:
+Verify the patch against the pinned base in a local PX4 checkout:
 
 ```bash
 python3 tools/verify_pinned_base.py ~/PX4-Autopilot
 ```
 
-That verifier works in a temporary directory and does not modify the supplied PX4 checkout.
+The verifier uses a temporary directory and leaves the supplied checkout unchanged.
 
 ## DJI O4 / MSP OSD
 
-Dragonfly also uses DJI O4 with PX4's existing MSP OSD support. That is **integration work, not a newly invented OSD protocol or driver**, and it is intentionally separate from this turtle-recovery patch. A reproducible integration guide is planned as a separate part of this repository.
+Dragonfly uses DJI O4 with PX4's existing MSP OSD support. Integration notes are tracked [separately](docs/DJI_OSD_SCOPE.md); the turtle patch covers recovery control.
 
-## Development disclosure
+## Development and license
 
-**Project Lead, Systems Integration & Hardware Validation:** [Yisrael Ben-Shlomo](https://github.com/yisrael-benshlomo)
+Yisrael Ben-Shlomo led the requirements, systems integration and hardware validation. Development used AI assistance for software, debugging, documentation and review.
 
-**Organization:** [BENSHLOMO | Advanced Systems](https://github.com/BENSHLOMO)
+Released under the **BSD 3-Clause License**, with PX4 attribution retained. See [LICENSE](LICENSE), [NOTICE](NOTICE.md) and [licensing details](docs/LICENSING.md).
 
-This project was initiated and led by Yisrael Ben-Shlomo, including recovery requirements, systems integration, troubleshooting, hardware testing and real-world validation.
-
-Software development involved substantial AI assistance for code generation, debugging, documentation and review, under Yisrael's direction.
-
-## License
-
-This repository uses the **BSD 3-Clause License**, matching the pinned PX4 base. See [`LICENSE`](LICENSE), [`NOTICE.md`](NOTICE.md), and [`docs/LICENSING.md`](docs/LICENSING.md).
-
-PX4 is a project of its respective contributors. BENSHLOMO is not claiming upstream endorsement or acceptance of this extension.
+[Project resource](https://benshlomosystems.com/resources/px4-turtle-mode/) · [Contributing](CONTRIBUTING.md)

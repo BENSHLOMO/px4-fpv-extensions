@@ -1,34 +1,44 @@
-# First Git/GitHub steps for this project
+# Working with this repository
 
-Git is already installed on the Lubuntu machine used for development. It records local source history. GitHub will host a separate publication repository; it is not where we need to move the full private PX4 checkout or aircraft backup.
+Git records local source history. GitHub hosts the shared repository, review discussions and releases. Keep this extension repository separate from the PX4 checkout used to build aircraft firmware.
 
-## Create an empty private repository
-
-On GitHub, create **px4-fpv-extensions**, visibility **Private**. Do not auto-add a README, license or gitignore when importing this prepared folder. These files should have one deliberate starting point.
-
-Use a new directory for this review package. Do not run `git remote add` or publish commands inside the working `PX4-Autopilot` checkout.
-
-## Local identity
-
-Inside the new publication directory, set `user.name` and `user.email` only for that repository. Use your chosen public identity and the GitHub-provided no-reply email when desired. Do not use the development placeholder `Dragonfly Local` as if it were your public identity.
-
-## The first commands, once the remote URL and identity are known
+## Clone and create a branch
 
 ```bash
-git init -b main
-git status
+git clone https://github.com/BENSHLOMO/px4-fpv-extensions.git
+cd px4-fpv-extensions
+git switch -c docs/my-update
 ```
 
-Review files before staging. `git add` selects content for a snapshot; `git commit` creates the snapshot locally; `git push` uploads it. `git status` is the check before and after each step. A remote URL is not an authentication token. Never paste private keys or access tokens into a public README.
+Use a short branch name that describes the change.
 
-At this stage, send the private repository URL to continue setup. This package neither creates a repository nor publishes anything.
+## Author identity
 
-## Keeping the working aircraft intact
+Set your name and email in this checkout before committing. Repository-local settings apply only here. GitHub provides a no-reply email option for contributors who prefer it.
 
-The historical full backup and exact source tag remain the rollback point. The public project starts with the immutable exported patch. Any cleanup belongs in later commits with its own checks, not silent edits to the frozen patch.
+```bash
+git config user.name "Your Name"
+git config user.email "your-github-noreply-address"
+```
 
-Before making the repository public, inspect its history as well as the current files. Never add the full aircraft parameter dump or the frozen ZIP. `.gitignore` is a precaution, not a substitute for reviewing staged files.
+Replace both example values with your own identity.
+
+## Review and commit
+
+```bash
+git status --short
+git diff
+```
+
+Stage only the intended files with `git add`, then create a local snapshot with `git commit`. Update the relevant checksum entries in `SHA256SUMS` when changing listed files. Run the checks in [Contributing](../CONTRIBUTING.md) before submitting the branch.
+
+Push to a repository where you have write access, or use a fork and open a pull request. Review the staged diff before pushing. Keep aircraft-specific parameter exports, firmware backups and credentials outside this repository.
+
+## Preserving release history
+
+Existing baseline and release tags identify reproducible source checkpoints. Make fixes in new commits and record functional changes and validation in the pull request. The tested aircraft's firmware and settings are separate from the extension repository.
 
 References:
-- https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-new-repository
-- https://docs.github.com/en/repositories/creating-and-managing-repositories/about-repositories
+
+- [GitHub repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/about-repositories)
+- [Contributing](../CONTRIBUTING.md)

@@ -1,51 +1,42 @@
-# Publication status
+# Release status
 
-## Preserved tested baseline
+## Current release
 
-The private repository baseline is tagged:
+The project distributes an experimental source extension for PX4 v1.16.1, with configurable turtle recovery for conventional Quad-X layouts using verified compatible temporary-direction DShot ESC commands.
+
+Hardware validation currently covers the Dragonfly development aircraft. Ports to other PX4 revisions and additional hardware profiles require separate builds and validation.
+
+## Source history
+
+The original exported hardware-tested checkpoint is preserved by the tag:
 
 ```text
 private-baseline-b8-trtl
 ```
 
-The underlying working aircraft checkpoint was separately frozen before publication work. The baseline patch remains unchanged in this documentation cleanup.
+The published patch includes a subsequent comment and SPDX cleanup. This cleanup changes no executable statements and has passed host tests and pinned-base patch checks. It has not been flashed and hardware-tested as a separate firmware build. See [Source hygiene](SOURCE_HYGIENE.md) for both patch hashes and the scope of the change.
 
-## Current release posture
+## Validation record
 
-Appropriate description:
+- Successful ARM target build for the Dragonfly MicoAir H743 V2 configuration.
+- Real-world recovery success reported by the Dragonfly operator.
+- Host tests covering controller state logic, motor mapping, RC validation and Commander/DShot ownership.
+- Temporary application of the cleaned patch to the pinned base, with base and target Git blob verification.
+- Preserved PX4 BSD-3-Clause license and source notices.
 
-> Experimental configurable PX4 v1.16.1 turtle recovery for supported conventional Quad-X layouts with verified compatible temporary-direction DShot ESC behavior on the Dragonfly development aircraft.
+See [Validation](VALIDATION.md) and [Hardware validation matrix](HARDWARE_MATRIX.md) for details.
 
-Do **not** describe it as:
+## Compatibility and operational limits
 
-- universal;
-- production-ready;
-- validated on most quads;
-- compatible with every AM32/BLHeli/Bluejay/DShot ESC;
-- upstream PX4 functionality;
-- independently watchdog-protected;
-- capable of confirming physical ESC direction from software counters alone.
+- The exact AM32 firmware version and target remain to be recorded.
+- Additional flight controllers, ESC versions and propulsion configurations require hardware testing.
+- ESC command counters record transmitted sequences; the implementation has no physical direction acknowledgement.
+- Arming coordination is implemented in software and is separate from an independent hardware watchdog.
+- The release is maintained separately from upstream PX4 and has experimental status.
 
-## Evidence available
+## Further work
 
-- successful target build on the Dragonfly MicoAir H743 V2 development target;
-- real-world operator-reported recovery success on Dragonfly;
-- exported working patch;
-- host tests for state logic, mapping, RC validation and arming/recovery ownership;
-- exact PX4 BSD-3-Clause license from the pinned base.
-
-## Before changing repository visibility to Public
-
-1. Review the README and installation instructions.
-2. Record the exact AM32 firmware version used on Dragonfly if available.
-3. Keep the repository's tested-baseline tag.
-4. Ensure no private parameter export, firmware backup, private keys, tokens or client material are present.
-5. Decide whether to publish the tested patch unchanged first or make a separate source-hygiene patch and retest it.
-6. Add the BENSHLOMO website URL and project media only after those destinations are ready.
-
-## Planned follow-on content
-
-- DJI O4 / PX4 MSP OSD integration guide, clearly identified as integration of existing PX4 support;
-- website engineering case study;
-- LinkedIn launch post;
-- optional upstream discussion after the experimental release is reproducible.
+- Document additional hardware profiles and fault-case results.
+- Record a clean-checkout target build with its complete board configuration.
+- Publish the DJI O4 / PX4 MSP OSD integration profile separately.
+- Prepare an upstream technical discussion and port against the requested PX4 revision.

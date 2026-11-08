@@ -1,45 +1,41 @@
-# Release review of the exported working patch
+# Baseline source review
 
-Reviewed 8 November 2026. Input: `dragonfly_turtle_core.patch`.
+Initial review: 8 November 2026. Input: the original `dragonfly_turtle_core.patch` export preserved in the baseline history.
 
 SHA-256: `2f4933719c71876fea964ea87c48cdb550f9c8f21d87fae6f8171fe2d1cbe913`  
 Size: 73,391 bytes; 1,516 lines; 14 touched paths; 9 new files; 1,346 inserted lines and no deleted lines (Git numstat).
 
-## Verdict
+The current published patch has subsequent comment and SPDX updates. See [Source hygiene](SOURCE_HYGIENE.md) for its hash and validation record.
 
-**Suitable as the unchanged baseline in a private review repository. Not yet presented as a polished upstream pull request or universal release.** Nothing in this review modifies the uploaded firmware patch or the user's frozen backups. The working hardware result remains valid as the operator's observation.
+## Findings and disposition
 
-## Findings
-
-| ID | Finding in the supplied patch | Action before presenting a polished release |
+| ID | Baseline finding | Disposition |
 |---|---|---|
-| P1 | DShot.cpp contains a stale comment saying motor output is compile-disabled (patch lines 76-81), although the active B8 path can issue throttle. | Correct explanatory comments in a separate cleanup commit. Do not describe the current firmware as simulation-only. |
-| P2 | DShot.h retains old RecoveryTimer/Sequencer/Frame instances, parameter members and B1 diagnostic counters alongside the active `_trtl_core` (patch lines 358-429). | Remove proven-unused members/includes/helpers in a separate refactor, with a build and the same host tests. Not removed from this snapshot. |
-| P3 | Legacy helper policies disagree with active B8: old angle helper minimum 85 degrees vs active minimum 60; legacy RC `off()` uses `<0.3`, active B8 requires `<-0.3`. Old motor helper has different waits and drive limits. | Make the active controller authoritative in docs; remove or clearly isolate unused helpers. The active B8 path does not use these old helpers to decide its OFF threshold. |
-| P4 | Four new headers have no SPDX marker: driver ArmingInterlock forwarding header, Angle, Motor and Rc. Others declare BSD-3-Clause. The patch is not a complete license/notice bundle. | Finalize consistent notices and retain exact upstream notices before public distribution. See LICENSING.md. |
-| P5 | This code-only diff includes no tests, README or install instructions. | Supplied review scaffold adds tests/docs without altering patch bytes. Host tests are not a substitute for target/hardware evidence. |
-| P6 | The patch names exact base/target Git blob IDs but does not itself specify the base commit. It depends on older PX4 Commander, mixer and DShot interfaces. | Keep the manifest and pinned-base check. Do not advertise compatibility with arbitrary PX4 releases. |
-| P7 | No board files, OSD driver changes or legacy probe module are included. | Keep the turtle-core patch separate from the tested full-aircraft configuration. A clean stock build may differ in size/features from the user's custom build. |
-| P8 | Defaults are disabled, unconfigured ESC profile and zero corner mappings. Power defaults 850/1500 retain Dragonfly tuning. | Make opt-in setup explicit; do not tell other pilots to copy Dragonfly motor order or assume these are universal propulsion values. |
-| P9 | Real command acceptance, direction restoration and ESC reset behavior are not proved by counters. Exact AM32 firmware version was not supplied here. | Retain this boundary in README and hardware matrix; record the exact version before claiming support for it. |
+| P1 | DShot.cpp retained a Stage 2B1 comment saying motor output was compile-disabled, although the active B8 path can issue throttle. | Corrected in the comment/SPDX cleanup. The B8 controller is motor-enabled. |
+| P2 | DShot.h retained earlier RecoveryTimer/Sequencer/Frame instances, parameter members and B1 diagnostic counters alongside the active `_trtl_core`. | Retained. Removal is a separate refactor requiring a target build and host tests. |
+| P3 | Earlier helper thresholds differ from active B8 behavior, including angle, switch-OFF, wait and drive limits. | Documentation uses the active B8 controller. Legacy helper removal remains separate work. |
+| P4 | Four new headers lacked SPDX markers: driver ArmingInterlock forwarding header, Angle, Motor and Rc. | BSD-3-Clause identifiers added in the source cleanup; upstream notices retained. |
+| P5 | The original code-only diff contained no tests, README or installation guide. | The repository includes documentation and host tests against extracted patch headers. |
+| P6 | The diff carried exact Git blob IDs but depended on a specific PX4 Commander, mixer and DShot interface revision. | Base commit pinned in the manifest; the supplied verifier checks application and target blobs in a temporary directory. |
+| P7 | The core patch contains no board files, OSD changes or legacy probe module. | Aircraft/OSD configuration remains separate; a stock board build can differ from the development aircraft's build. |
+| P8 | Defaults are disabled, with an unconfigured ESC profile and zero corner mappings. Power defaults 850/1500 retain Dragonfly tuning. | Installation requires explicit motor mapping, ESC verification and propulsion-specific tuning. |
+| P9 | Transmitted command counters do not establish physical ESC direction or reset behavior. The exact AM32 version was not recorded. | Retained as a technical validation limit in the hardware matrix and operation guide. |
 
-P1-P5 are mainly source hygiene, reproducibility and release packaging. They do not justify replacing the already-working aircraft firmware during this step. No new functional failure was reproduced by the five host suites run for this review. This is not a proof that no functional bugs exist.
+## Initial review checks
 
-## Checks actually performed here
+1. Read all 14 diff sections, including the active input, controller, mapping and interlock paths.
+2. Verified all nine new-file payloads against their target Git blob hashes.
+3. Verified 21 short-name parameter definitions, with no legacy `DF_TRTL_` or `DF_TURT_` names.
+4. Ran five B8 host suites against headers extracted from the exact baseline patch, using `-Wall -Wextra -Werror` and undefined-behavior sanitizer.
+5. Tested temporary patch application, repository index/HEAD/worktree preservation, and checksum/path rejection on a synthetic Git repository.
+6. Reviewed repository content for aircraft backups, credentials and client material; none were found in that scoped inspection.
 
-1. Read all 14 diff sections and active input, controller, mapping and interlock code.
-2. Verified the new-file payloads against all nine target Git blob hashes.
-3. Verified 21 short-name parameter definitions with no old `DF_TRTL_`/`DF_TURT_` names in the uploaded patch.
-4. Re-ran five existing B8 host suites against **headers extracted from this exact uploaded patch**, with `-Wall -Wextra -Werror` and undefined-behavior sanitizer.
-5. Tested the added read-only base verifier on a synthetic Git repository; checked original index bytes/HEAD/worktree preservation and checksum/path refusal.
-6. Reviewed paths and content for obvious private material. No aircraft parameter dump, firmware image, private key, access token, password, home-directory path or client material was found. This is a scoped content review, not a formal secret-scan certification.
+## Validation scope
 
-## Not independently performed here
+The initial source review covered extracted headers and review tooling. Pinned-base patch application and blob checks were subsequently completed during source cleanup. The review did not perform a complete ARM/NuttX build, target scheduler test or hardware test.
 
-A complete clean PX4 checkout could not be retrieved in this environment. No complete clean-base application, GCC ARM/NuttX build, board scheduler test or hardware test was run here. `tools/verify_pinned_base.py` is provided to perform the apply/blob checks using the user's existing local Git objects, without changing that checkout.
+Successful target-build logs and real-world recovery reports belong to the preserved Dragonfly development checkpoint. The comment-cleaned patch has not been separately flashed and hardware-tested. A clean-checkout target build with a documented board configuration remains to be recorded.
 
-The earlier full firmware build, real recovery and frozen commit identity are reported evidence from the conversation. The host tests do not authenticate that a particular firmware is installed on the flight controller.
+## Release scope
 
-## Release recommendation
-
-Archive this exact snapshot privately, complete the publication cleanup in separate commits, and publish as an **experimental, source-level extension for a pinned PX4 version**. An upstream PR is a subsequent activity. No first-ever, upstream-accepted, production-ready, universal, independently watchdog-protected or direction-acknowledged claim is supported.
+The release is an experimental source extension for the pinned PX4 revision. Hardware evidence covers the Dragonfly configuration. Additional platforms and an upstream PX4 port require their own review and validation.

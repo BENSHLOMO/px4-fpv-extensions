@@ -1,20 +1,29 @@
-# Licensing review before public release
+# Licensing and attribution
 
-**Proposed project license: BSD-3-Clause, matching PX4's contribution policy.** This private starter does not declare missing provenance resolved.
+## Repository license
 
-Several new headers already use `SPDX-License-Identifier: BSD-3-Clause`. Four do not: the driver forwarding ArmingInterlock header and the Angle, Motor and Rc helpers. Add consistent notices in a separate reviewed cleanup, identifying actual copyright holders rather than inventing ownership. Preserve original notices in the patched upstream files. A unified diff normally omits most unchanged license headers, so their absence in a hunk is not proof that the full source lacks them.
+The repository uses the **BSD 3-Clause License**. The top-level `LICENSE` file was retrieved from the exact pinned PX4 base used by this extension:
 
-The PX4 license reference included under LICENSES was retrieved from upstream main during this review. Retrieve the exact pinned-base LICENSE from the user's repository before public distribution, for example with the read-only command:
-
-```bash
-git -C ~/PX4-Autopilot show 94cb2012792b2ae89f0b147cfee53ee31ae550be:LICENSE
+```text
+PX4-Autopilot 94cb2012792b2ae89f0b147cfee53ee31ae550be
 ```
 
-Do not represent this reference copy as independently verified against the pinned base. Finalize the top-level LICENSE and appropriate notices before changing the repository to Public. The unchanged snapshot remains traceable by its original hash.
+Redistribution of modified PX4 source must preserve the required copyright notice, license conditions, and disclaimer.
 
-AI assistance does not replace authorship/provenance review. Do not claim upstream endorsement or ownership of the pre-existing PX4 MSP OSD implementation.
+## Patched upstream files
 
-References:
-- https://raw.githubusercontent.com/PX4/PX4-Autopilot/main/LICENSE
-- https://docs.px4.io/main/en/contribute/licenses
-- https://docs.px4.io/main/en/contribute/ai_assistants
+The patch modifies existing PX4 files as well as adding extension headers. Existing upstream copyright/license notices in the full source files must be retained. The unified diff may not show unchanged notice blocks.
+
+## New extension files
+
+New source files should use consistent BSD-3-Clause SPDX identifiers where appropriate. The exact tested baseline patch is retained unchanged for traceability; source-hygiene changes should be made in separate commits and retested rather than silently rewriting the hardware-tested checkpoint.
+
+## Attribution
+
+The extension was developed under **BENSHLOMO | Advanced Systems**, led and hardware-tested by **Yisrael Ben-Shlomo**.
+
+Development used AI assistance for portions of code generation, debugging, documentation, and review. AI assistance does not imply authorship of upstream PX4 code and does not replace source-license obligations.
+
+## No endorsement
+
+PX4, MicoAir, AM32 and DJI names are used descriptively. This repository is not an upstream PX4 release and does not imply endorsement by those projects or manufacturers.

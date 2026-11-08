@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0 Experimental
+## v0.1.0-experimental.1
 
 **Developed by Yisrael Ben-Shlomo at BENSHLOMO | Advanced Systems**
 
@@ -23,12 +23,12 @@
 - AM32 ESC firmware family
 - Host testing and pinned-base patch verification passed
 
-### Limitations
+### Compatibility
 
-Experimental source release only. Other flight controllers,
-ESC implementations and Quad-X configurations require
-independent testing. No universal prebuilt firmware is supplied.
+Experimental source patch for the pinned PX4 v1.16.1 revision.
+Build for the target board and validate its motor mapping, geometry and
+ESC direction-command behavior. Hardware validation covers Dragonfly;
+additional configurations require independent testing.
 
-Software development involved substantial AI assistance.
-Project direction, hardware integration and real-world testing
-were led by Yisrael Ben-Shlomo.
+Development used AI assistance. Yisrael Ben-Shlomo led the requirements,
+hardware integration and real-world testing.

@@ -1,7 +1,7 @@
-# DJI O4 / MSP OSD publication scope
+# DJI O4 / MSP OSD integration
 
-The supplied turtle-core patch modifies no OSD driver, board definition, serial-port configuration or wiring guide. It cannot by itself reproduce the full Dragonfly aircraft firmware, including the reported DJI O4/MSP OSD setup.
+Dragonfly uses DJI O4 with PX4's existing MSP OSD implementation. This is a separate aircraft integration from the turtle-recovery extension.
 
-Publish that as a separately documented integration profile using the existing PX4 MSP OSD implementation. Do not credit this turtle patch with introducing upstream DJI OSD support. Pin the board build flags, wiring and parameters from actual evidence before providing a reproducible guide. No such details are invented in this review package.
+The turtle-core patch contains no OSD driver changes, board definitions, serial-port configuration or wiring guide. The full Dragonfly OSD setup is therefore outside the patch's installation scope.
 
-The website case study can describe both engineering activities, while the code repository clearly separates the turtle extension from the aircraft/OSD integration work.
+A reproducible OSD integration profile is planned separately. It will document the board build flags, wiring, serial-port assignments and parameters used on the test aircraft, with attribution to the existing PX4 MSP OSD implementation.

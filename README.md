@@ -1,6 +1,8 @@
 # PX4 FPV Extensions
 
-**Experimental PX4 extensions and integration notes from BENSHLOMO | Advanced Systems.**
+**Developed by [Yisrael Ben-Shlomo](https://github.com/yisrael-benshlomo) at [BENSHLOMO | Advanced Systems](https://github.com/BENSHLOMO)**
+
+Experimental PX4 extensions and integration notes.
 
 This repository currently contains a configurable **Quad-X turtle / crash-flip recovery extension** for a pinned PX4 v1.16.1 source revision. It was developed and hardware-tested on the personal **Dragonfly** 2.5-inch guarded quad, then generalized in software for supported conventional four-motor X-like layouts.
 
@@ -93,7 +95,13 @@ Dragonfly also uses DJI O4 with PX4's existing MSP OSD support. That is **integr
 
 ## Development disclosure
 
-Development used AI assistance for portions of code generation, debugging, documentation, and review. Hardware integration, configuration, iterative bench testing, real-aircraft testing, and release ownership were performed by **Yisrael Ben-Shlomo / BENSHLOMO Advanced Systems**.
+**Project Lead, Systems Integration & Hardware Validation:** [Yisrael Ben-Shlomo](https://github.com/yisrael-benshlomo)
+
+**Organization:** [BENSHLOMO | Advanced Systems](https://github.com/BENSHLOMO)
+
+This project was initiated and led by Yisrael Ben-Shlomo, including recovery requirements, systems integration, troubleshooting, hardware testing and real-world validation.
+
+Software development involved substantial AI assistance for code generation, debugging, documentation and review, under Yisrael's direction.
 
 ## License
 

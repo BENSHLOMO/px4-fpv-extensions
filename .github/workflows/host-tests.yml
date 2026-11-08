@@ -1,0 +1,31 @@
+name: PX4 FPV Host Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify checksums
+        run: sha256sum -c SHA256SUMS
+
+      - name: Test turtle controller
+        run: python3 tests/run_host_tests.py
+
+      - name: Test review tools
+        run: python3 tests/test_review_tools.py

@@ -4,11 +4,19 @@
 
 Configurable turtle mode (crash-flip recovery) for Quad-X aircraft running PX4.
 
-Turtle mode lets a pilot recover a quadcopter that has tipped over by temporarily reversing selected motors and using the roll/pitch stick to turn it upright. It is particularly useful for indoor flying and operation near obstacles, where a collision can leave an aircraft overturned and difficult to reach.
+Turtle mode lets a pilot recover a quadcopter that has tipped over by temporarily reversing motor direction and driving the motors selected with the roll/pitch stick to turn it upright. It is particularly useful for indoor flying and operation near obstacles, where a collision can leave an aircraft overturned and difficult to reach.
 
 We developed this extension for Dragonfly, a 2.5-inch guarded quad, and released the source for other PX4 builders. Motor mapping, radio input, power, timing and recovery angles are configurable through 21 native `TRTL_*` parameters in QGroundControl.
 
 **Release:** experimental source patch for PX4 v1.16.1. Hardware validation currently covers the Dragonfly configuration below. Additional builds require configuration and validation for their airframe and ESC firmware.
+
+## Recovery demonstration
+
+Dragonfly recovers from inverted and near-vertical starting positions, completes repeated attempts, and returns to normal arming and flight. The video includes the setup workflow and live attitude/RC telemetry alongside the aircraft.
+
+https://github.com/user-attachments/assets/52dea387-f7dd-4787-bfcc-19a3bb74b075
+
+Recorded on the MicoAir H743 V2 / AM32 configuration described below.
 
 ## Recovery controls
 
